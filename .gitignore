@@ -1,19 +1,57 @@
+# ---- Python ----
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
 *.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ---- Virtualenvs / tooling ----
 .venv/
 venv/
+env/
+.python-version
+
+# ---- Secrets / local config ----
 .env
 .env.local
-data/
+.env.*.local
 cookies/
+*.pem
+*.key
+
+# ---- Local data ----
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- Caches / coverage ----
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
-dist/
-build/
-*.db
-*.sqlite3
 graphify-out/
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Editors / OS ----
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
