@@ -28,21 +28,6 @@ LOGGER = get_logger("api.scrape")
 
 # Error envelope shared by every endpoint that can fail on a single resource.
 _SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    400: {
-        "model": ErrorResponse,
-        "description": "`unsupported_url` — the handle or URL could not be resolved to a profile/post.",
-    },
-    401: {
-        "model": ErrorResponse,
-        "description": "`auth_required` — upstream needs a session; export a Netscape cookie jar.",
-    },
-    403: {
-        "model": ErrorResponse,
-        "description": (
-            "`blocked` — upstream rejected the request (bot check / login wall). "
-            "Cookies or a residential proxy usually help."
-        ),
-    },
     404: {
         "model": ErrorResponse,
         "description": "`not_found` — the profile or post does not exist (or was removed).",
