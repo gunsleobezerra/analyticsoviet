@@ -83,7 +83,19 @@ class Settings(BaseSettings):
     youtube_api_key: str | None = None
     instagram_app_id: str = "936619743392459"
 
-    # ---- cookies ----
+    # ---- cookies storage backend ----
+    # 'local' reads directly from local filesystem.
+    # 's3' downloads cookies from any S3-compatible storage (MinIO, R2, Ceph, AWS S3)
+    cookies_storage_backend: Literal["local", "s3"] = "local"
+    s3_endpoint_url: str | None = None
+    s3_cookies_bucket: str = ""
+    s3_cookies_prefix: str = "cookies/"
+    s3_region_name: str = "us-east-1"
+    s3_access_key_id: str | None = None
+    s3_secret_access_key: str | None = None
+    s3_session_token: str | None = None
+
+    # ---- cookies files ----
     cookies_dir: Path = Path("cookies")
     cookies_youtube_file: Path | None = None
     cookies_tiktok_file: Path | None = None

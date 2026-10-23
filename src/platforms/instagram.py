@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
-from core.errors import BlockedError, NotFoundError, UpstreamError
+from core.errors import BlockedError, NotFoundError, ScrapeError, UpstreamError
 from models.schemas import (
     Confidence,
     Platform,
@@ -62,12 +62,18 @@ _RESERVED_PATHS = {
     "session",
 }
 
+# Instagram serves its internal endpoints under underscore-prefixed paths
+# (``/__a/``, ``/_u/``). Usernames may legitimately start with an underscore,
+# so only the known internal paths are rejected instead of every ``_`` prefix.
+_INTERNAL_PATHS = {"_u", "_n", "_a", "_r"}
+_INTERNAL_PREFIXES = ("__",)
+
 _SHORTCODE_RE = re.compile(r"/(?:p|reel|reels|tv)/([A-Za-z0-9_\-]{5,})")
 
 _PROFILE_DESC_RE = re.compile(
     r"([\d.,]+\s*[KMB]?)\s*(?:Followers?|seguidores?)\s*,\s*"
-    r"([\d.,]+\s*[KMB]?)\s*(?:Following|seguindo)\s*,\s*"
-    r"([\d.,]+\s*[KMB]?)\s*(?:Posts?|publica[çc][õo]es)",
+    r"(?:Following|seguindo)?\s*([\d.,]+\s*[KMB]?)\s*(?:Following|seguindo)?\s*,\s*"
+    r"([\d.,]+\s*[KMB]?)\s*(?:Posts?|publica[çc][õo]es|posts?)",
     re.I,
 )
 
@@ -132,7 +138,12 @@ class InstagramAdapter(BaseAdapter):
             return None
 
         raw_handle = segments[0]
-        if raw_handle.lower() in _RESERVED_PATHS or raw_handle.startswith("_"):
+        lowered = raw_handle.lower()
+        if (
+            lowered in _RESERVED_PATHS
+            or lowered in _INTERNAL_PATHS
+            or raw_handle.startswith(_INTERNAL_PREFIXES)
+        ):
             return None
         handle = self.clean_handle(raw_handle)
         if not handle:
@@ -277,7 +288,7 @@ class InstagramAdapter(BaseAdapter):
                 headers=headers,
                 retries=2,
             )
-        except (BlockedError, NotFoundError, UpstreamError) as exc:
+        except ScrapeError as exc:
             self.log.info("instagram_web_profile_failed", handle=handle, error=str(exc))
             return None
 

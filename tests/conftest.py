@@ -20,6 +20,7 @@ from core.config import Settings
 from core.http import HttpClient
 from platforms.base import AdapterContext
 from platforms.registry import AdapterRegistry
+from profile_cases import ProfileCase, load_cases
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -95,3 +96,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 @pytest.fixture
 def fixture_html() -> Any:
     return load_fixture
+
+
+@pytest.fixture(scope="session")
+def profile_cases() -> list[ProfileCase]:
+    """The curated profile list from ``tests/test_profiles.txt``."""
+    return load_cases()

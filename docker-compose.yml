@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-8008}:8000"
     # .env (if present) supplies rate limits, timeouts, cookie paths, etc.
     env_file:
       - path: .env
@@ -28,10 +28,19 @@ services:
       DATABASE_URL: sqlite+aiosqlite:///./data/analyticsoviet.db
       ENABLE_HISTORY: "true"
       WEB_CONCURRENCY: "${WEB_CONCURRENCY:-1}"
+      # Storage backend for cookies ('local' or 's3')
+      COOKIES_STORAGE_BACKEND: "${COOKIES_STORAGE_BACKEND:-local}"
+      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:-}"
+      S3_COOKIES_BUCKET: "${S3_COOKIES_BUCKET:-}"
+      S3_COOKIES_PREFIX: "${S3_COOKIES_PREFIX:-cookies/}"
+      S3_REGION_NAME: "${S3_REGION_NAME:-us-east-1}"
+      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:-}"
+      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:-}"
+      S3_SESSION_TOKEN: "${S3_SESSION_TOKEN:-}"
     volumes:
       - api-data:/app/data
-      # Optional Netscape cookie jars (read-only). Create ./cookies/ on the host.
-      - ./cookies:/app/cookies:ro
+      # Cookie jars: local folder or S3 sync target (writable by container)
+      - ./cookies:/app/cookies
     depends_on:
       redis:
         condition: service_healthy

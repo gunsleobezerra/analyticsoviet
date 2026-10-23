@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.deps import build_state
+from api.docs import API_DESCRIPTION, OPENAPI_TAGS, install_docs
 from api.routes import metrics, scrape, system
 from core.cache import create_cache
 from core.config import Settings, get_settings
@@ -31,6 +32,15 @@ LOGGER = get_logger("app")
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     configure_logging(settings.log_level, json_logs=settings.environment != "dev")
+
+    if settings.cookies_storage_backend == "s3":
+        try:
+            from core.cookies_s3 import sync_cookies_from_s3
+
+            downloaded = await sync_cookies_from_s3(settings)
+            LOGGER.info("cookies_s3_synced", count=len(downloaded), files=downloaded)
+        except Exception as exc:
+            LOGGER.warning("cookies_s3_sync_failed", error=str(exc))
 
     http = HttpClient(settings)
     await http.start()
@@ -61,17 +71,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="analyticsoviet",
-        description=(
-            "Social media metrics API. Extracts public data from YouTube, TikTok, "
-            "Instagram and Facebook using plain HTML/embedded JSON only — no headless "
-            "browser is ever launched."
-        ),
+        description=API_DESCRIPTION,
         version=settings.app_version,
+        summary="Public social media metrics from HTML — no headless browser.",
         lifespan=lifespan,
-        docs_url="/docs",
+        docs_url=None,
+        redoc_url="/redoc",
         openapi_url="/openapi.json",
+        openapi_tags=OPENAPI_TAGS,
+        contact={
+            "name": "analyticsoviet",
+            "url": "https://github.com/leoso/analyticsoviet",
+        },
+        license_info={"name": "MIT"},
+        swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect",
     )
     app.state.settings = settings
+
+    # Swagger UI served from the bundled assets (no CDN dependency).
+    install_docs(app, title="analyticsoviet")
 
     @app.middleware("http")
     async def request_context_middleware(request: Request, call_next: Any) -> Any:
@@ -100,12 +118,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scrape.router, prefix=settings.api_prefix)
     app.include_router(metrics.router, prefix=settings.api_prefix)
 
-    @app.get("/", include_in_schema=False)
+    @app.get(
+        "/",
+        tags=["system"],
+        summary="Service banner",
+        description="Name, version, documentation URL and the platforms enabled in this instance.",
+        response_description="Service metadata.",
+    )
     async def root() -> dict[str, Any]:
         return {
             "name": settings.app_name,
             "version": settings.app_version,
             "docs": "/docs",
+            "redoc": "/redoc",
+            "openapi": "/openapi.json",
             "api": settings.api_prefix,
             "platforms": [platform.value for platform in Platform],
         }

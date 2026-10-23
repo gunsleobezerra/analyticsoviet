@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Path, Query
 
 from api.deps import AppState, StateDep
 from api.urls import resolve_profile_url
@@ -13,6 +14,7 @@ from core.errors import ScrapeError, UnsupportedUrlError
 from core.logging import get_logger
 from db.snapshots import record_result
 from models.schemas import (
+    ErrorResponse,
     Platform,
     ResultStatus,
     ScrapeRequest,
@@ -24,11 +26,66 @@ from platforms.base import ParsedUrl
 router = APIRouter(tags=["scrape"])
 LOGGER = get_logger("api.scrape")
 
+# Error envelope shared by every endpoint that can fail on a single resource.
+_SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {
+        "model": ErrorResponse,
+        "description": "`unsupported_url` — the handle or URL could not be resolved to a profile/post.",
+    },
+    401: {
+        "model": ErrorResponse,
+        "description": "`auth_required` — upstream needs a session; export a Netscape cookie jar.",
+    },
+    403: {
+        "model": ErrorResponse,
+        "description": (
+            "`blocked` — upstream rejected the request (bot check / login wall). "
+            "Cookies or a residential proxy usually help."
+        ),
+    },
+    404: {
+        "model": ErrorResponse,
+        "description": "`not_found` — the profile or post does not exist (or was removed).",
+    },
+    429: {
+        "model": ErrorResponse,
+        "description": "`rate_limited` — local limiter or upstream 429. Retry after backing off.",
+    },
+    502: {
+        "model": ErrorResponse,
+        "description": "`parse_error` / `upstream_error` — payload unreadable or the upstream host failed.",
+    },
+    503: {
+        "model": ErrorResponse,
+        "description": "`circuit_open` — the platform breaker tripped; retry after the cooldown.",
+    },
+}
+
 
 @router.post(
     "/scrape",
     response_model=ScrapeResponse,
     summary="Scrape one or more profile/post URLs in parallel",
+    description=(
+        "Dispatches every URL in the batch concurrently and returns one result per item, "
+        "in the same order as the request.\n\n"
+        "* A failing item **never** aborts the batch: the response is still `200` and only "
+        "that item carries `status: \"failed\"` plus an `error` object.\n"
+        "* Mixed batches (profiles and posts, multiple platforms) are supported.\n"
+        "* Successful items are cached and, when history is enabled, persisted as snapshots "
+        "so `/v1/history` can chart them later.\n\n"
+        "Maximum of 50 URLs per request; each profile samples at most 50 posts."
+    ),
+    response_description="Per-item results plus aggregate counters and elapsed time.",
+    responses={
+        200: {
+            "description": (
+                "Batch processed. Inspect `ok_count`, `partial_count` and `failed_count` "
+                "to know how many items actually succeeded."
+            )
+        },
+        422: {"description": "Request body failed validation (empty `urls`, out-of-range `posts_limit`)."},
+    },
 )
 async def scrape(payload: ScrapeRequest, state: StateDep) -> ScrapeResponse:
     started = time.perf_counter()
@@ -53,14 +110,40 @@ async def scrape(payload: ScrapeRequest, state: StateDep) -> ScrapeResponse:
     "/profile/{platform}/{handle}",
     response_model=ScrapeResult,
     summary="Scrape a single profile by platform and handle",
+    description=(
+        "Accepts either a bare handle (`nasa`, `@mkbhd`) or a full profile URL and returns "
+        "the identity plus audience counters, optionally with a sample of recent posts.\n\n"
+        "The response declares `status`, `source` and `confidence`, so callers can tell "
+        "extracted numbers from missing ones — absent metrics are `null` and listed in "
+        "`warnings`, never silently zeroed."
+    ),
+    response_description="Profile payload (and sampled posts) with provenance metadata.",
+    responses=_SCRAPE_ERROR_RESPONSES,
 )
 async def profile(
-    platform: Platform,
-    handle: str,
+    platform: Annotated[Platform, Path(description="Platform that owns the profile.")],
+    handle: Annotated[
+        str,
+        Path(
+            description="Handle without `@`, or a full profile URL.",
+            examples=["nasa"],
+        ),
+    ],
     state: StateDep,
-    include_posts: bool = Query(default=True),
-    posts_limit: int = Query(default=12, ge=0, le=50),
-    refresh: bool = Query(default=False),
+    include_posts: Annotated[
+        bool, Query(description="Attach the sampled post list to the profile result.")
+    ] = True,
+    posts_limit: Annotated[
+        int,
+        Query(
+            ge=0,
+            le=50,
+            description="How many recent posts to sample (`0` disables post fetching).",
+        ),
+    ] = 12,
+    refresh: Annotated[
+        bool, Query(description="Ignore the cache entry and hit upstream again.")
+    ] = False,
 ) -> ScrapeResult:
     adapter = state.registry.get(platform)
     parsed = resolve_profile_url(adapter, platform, handle)
@@ -81,8 +164,28 @@ async def profile(
     "/post",
     response_model=ScrapeResult,
     summary="Scrape a single post/video by URL",
+    description=(
+        "Resolves the URL to its platform and fetches that single post/video. "
+        "Supported shapes: `youtube.com/watch?v=…`, `youtu.be/…`, `youtube.com/shorts/…`, "
+        "`tiktok.com/@user/video/…`, `instagram.com/p|reel|tv/…`, `facebook.com/…/posts/…`.\n\n"
+        "Use `POST /v1/scrape` instead when you need several items in one round trip."
+    ),
+    response_description="The post with its counters and provenance metadata.",
+    responses=_SCRAPE_ERROR_RESPONSES,
 )
-async def post(url: str, state: StateDep, refresh: bool = Query(default=False)) -> ScrapeResult:
+async def post(
+    state: StateDep,
+    url: Annotated[
+        str,
+        Query(
+            description="Full post/video URL on a supported platform.",
+            examples=["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+        ),
+    ],
+    refresh: Annotated[
+        bool, Query(description="Ignore the cache entry and hit upstream again.")
+    ] = False,
+) -> ScrapeResult:
     parsed = state.registry.detect(url)
     if parsed.kind != "post":
         raise UnsupportedUrlError("URL does not point to a post", detail={"url": url})
