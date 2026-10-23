@@ -52,8 +52,8 @@ item as `failed`, leaving the rest of the results intact.
 | Platform | Profile | Posts | Reliability | Primary source |
 |---|---|---|---|---|
 | YouTube | followers, posts | views, likes, comments | high | `ytInitialData` (+ `yt-dlp` / Data API v3 fallbacks) |
-| TikTok | followers, following, likes, posts | views, likes, comments, shares | medium-high | `__UNIVERSAL_DATA…` (+ oEmbed) |
-| Instagram | followers, following, posts | likes, comments | medium | Open Graph tags (+ `data-sjs` when present) |
+| TikTok | followers, following, likes, posts | views, likes, comments, shares | medium-high | `__UNIVERSAL_DATA…` |
+| Instagram | followers, following, posts | likes, comments | medium | Open Graph tags (+ `data-sjs`) |
 | Facebook | followers/likes (partial) | reactions/comments (limited) | low | `mbasic.facebook.com` + Open Graph |
 
 ### Errors

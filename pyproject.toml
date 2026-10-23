@@ -22,6 +22,9 @@ dependencies = [
     "swagger-ui-bundle>=1.1.0",
 ]
 
+[project.scripts]
+analyticsoviet-mcp = "mcp_server:main"
+
 [project.optional-dependencies]
 ytdlp = ["yt-dlp>=2024.10.7"]
 redis = ["redis>=5.2"]
@@ -35,6 +38,7 @@ dev = [
     "types-python-dateutil",
 ]
 s3 = ["boto3 (>=1.34)"]
+mcp = ["mcp (>=1.0.0)"]
 
 [build-system]
 requires = ["hatchling"]

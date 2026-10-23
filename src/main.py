@@ -15,24 +15,29 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.deps import build_state
-from api.docs import API_DESCRIPTION, OPENAPI_TAGS, install_docs
+from api.docs import API_DESCRIPTION, EXTERNAL_DOCS, OPENAPI_TAGS, build_servers, install_docs
 from api.routes import metrics, scrape, system
+from core.banner import inspect_cookies, print_startup_banner
 from core.cache import create_cache
 from core.config import Settings, get_settings
 from core.errors import ScrapeError
 from core.http import HttpClient
 from core.logging import bind_request_id, configure_logging, get_logger
 from db.session import Database
-from models.schemas import Platform
+from models.schemas import Platform, ServiceInfo
 
 LOGGER = get_logger("app")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    boot_started = time.perf_counter()
     settings: Settings = app.state.settings
-    configure_logging(settings.log_level, json_logs=settings.environment != "dev")
+    json_logs = settings.environment != "dev"
+    configure_logging(settings.log_level, json_logs=json_logs)
 
+    downloaded: list[str] | None = None
+    s3_error: str | None = None
     if settings.cookies_storage_backend == "s3":
         try:
             from core.cookies_s3 import sync_cookies_from_s3
@@ -40,7 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             downloaded = await sync_cookies_from_s3(settings)
             LOGGER.info("cookies_s3_synced", count=len(downloaded), files=downloaded)
         except Exception as exc:
-            LOGGER.warning("cookies_s3_sync_failed", error=str(exc))
+            s3_error = str(exc)
+            LOGGER.warning("cookies_s3_sync_failed", error=s3_error)
 
     http = HttpClient(settings)
     await http.start()
@@ -56,6 +62,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version=settings.app_version,
         cache=settings.cache_backend,
         history=db.enabled,
+    )
+
+    cookie_report = inspect_cookies(settings, downloaded)
+    LOGGER.info(
+        "cookies_loaded",
+        files=[info.path.name for info in cookie_report if info.exists],
+        missing=[info.platform for info in cookie_report if not info.exists],
+        cookies=sum(info.cookies for info in cookie_report if info.exists),
+        backend=settings.cookies_storage_backend,
+    )
+    print_startup_banner(
+        settings,
+        downloaded=downloaded,
+        s3_error=s3_error,
+        elapsed_ms=(time.perf_counter() - boot_started) * 1000,
+        json_logs=json_logs,
     )
     try:
         yield
@@ -84,6 +106,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "url": "https://github.com/leoso/analyticsoviet",
         },
         license_info={"name": "MIT"},
+        servers=build_servers(settings.public_base_url),
+        openapi_external_docs=EXTERNAL_DOCS,
         swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect",
     )
     app.state.settings = settings
@@ -118,23 +142,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scrape.router, prefix=settings.api_prefix)
     app.include_router(metrics.router, prefix=settings.api_prefix)
 
+    # Model Context Protocol (MCP) SSE endpoint for AI assistants
+    try:
+        from mcp_server import mcp
+
+        app.mount("/mcp", mcp.sse_app())
+        LOGGER.info("mcp_server_mounted", path="/mcp")
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning("mcp_mount_failed", error=str(exc))
+
     @app.get(
         "/",
         tags=["system"],
+        response_model=ServiceInfo,
         summary="Service banner",
         description="Name, version, documentation URL and the platforms enabled in this instance.",
         response_description="Service metadata.",
     )
-    async def root() -> dict[str, Any]:
-        return {
-            "name": settings.app_name,
-            "version": settings.app_version,
-            "docs": "/docs",
-            "redoc": "/redoc",
-            "openapi": "/openapi.json",
-            "api": settings.api_prefix,
-            "platforms": [platform.value for platform in Platform],
-        }
+    async def root() -> ServiceInfo:
+        return ServiceInfo(
+            name=settings.app_name,
+            version=settings.app_version,
+            docs="/docs",
+            redoc="/redoc",
+            openapi="/openapi.json",
+            api=settings.api_prefix,
+            platforms=[platform.value for platform in Platform],
+        )
 
     return app
 

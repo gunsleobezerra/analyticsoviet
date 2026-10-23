@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
@@ -25,26 +25,6 @@ from platforms.base import ParsedUrl
 
 router = APIRouter(tags=["scrape"])
 LOGGER = get_logger("api.scrape")
-
-# Error envelope shared by every endpoint that can fail on a single resource.
-_SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    404: {
-        "model": ErrorResponse,
-        "description": "`not_found` — the profile or post does not exist (or was removed).",
-    },
-    429: {
-        "model": ErrorResponse,
-        "description": "`rate_limited` — local limiter or upstream 429. Retry after backing off.",
-    },
-    502: {
-        "model": ErrorResponse,
-        "description": "`parse_error` / `upstream_error` — payload unreadable or the upstream host failed.",
-    },
-    503: {
-        "model": ErrorResponse,
-        "description": "`circuit_open` — the platform breaker tripped; retry after the cooldown.",
-    },
-}
 
 @router.post(
     "/scrape",
@@ -102,7 +82,7 @@ async def scrape(payload: ScrapeRequest, state: StateDep) -> ScrapeResponse:
         "`warnings`, never silently zeroed."
     ),
     response_description="Profile payload (and sampled posts) with provenance metadata.",
-    responses=_SCRAPE_ERROR_RESPONSES,
+    responses=ERROR_RESPONSES,
 )
 async def profile(
     platform: Annotated[Platform, Path(description="Platform that owns the profile.")],
@@ -155,7 +135,7 @@ async def profile(
         "Use `POST /v1/scrape` instead when you need several items in one round trip."
     ),
     response_description="The post with its counters and provenance metadata.",
-    responses=_SCRAPE_ERROR_RESPONSES,
+    responses=ERROR_RESPONSES,
 )
 async def post(
     state: StateDep,

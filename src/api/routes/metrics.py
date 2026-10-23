@@ -2,40 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
 from api.deps import StateDep
+from api.docs import ERROR_RESPONSES
 from api.urls import resolve_profile_url
 from core.errors import UnsupportedUrlError
 from db.snapshots import fetch_history
-from models.schemas import ErrorResponse, HistoryResponse, Platform, ResultStatus, ScrapeResult
+from models.schemas import HistoryResponse, Platform, ResultStatus, ScrapeResult
 from services.normalize import build_derived
 
 router = APIRouter(tags=["metrics"])
-
-_PROFILE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    400: {
-        "model": ErrorResponse,
-        "description": "`unsupported_url` — the handle could not be resolved to a profile.",
-    },
-    401: {
-        "model": ErrorResponse,
-        "description": "`auth_required` — upstream needs a session; export a Netscape cookie jar.",
-    },
-    403: {
-        "model": ErrorResponse,
-        "description": "`blocked` — upstream rejected the request (bot check / login wall).",
-    },
-    404: {"model": ErrorResponse, "description": "`not_found` — the profile does not exist."},
-    429: {"model": ErrorResponse, "description": "`rate_limited` — back off and retry."},
-    502: {
-        "model": ErrorResponse,
-        "description": "`parse_error` / `upstream_error` — payload unreadable or upstream failed.",
-    },
-    503: {"model": ErrorResponse, "description": "`circuit_open` — the platform breaker tripped."},
-}
 
 
 @router.get(
@@ -56,7 +35,7 @@ _PROFILE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "denominator is never treated as zero."
     ),
     response_description="Profile payload with a populated `derived` block.",
-    responses=_PROFILE_ERROR_RESPONSES,
+    responses=ERROR_RESPONSES,
 )
 async def metrics(
     platform: Annotated[Platform, Path(description="Platform that owns the profile.")],

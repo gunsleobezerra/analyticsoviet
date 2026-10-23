@@ -31,7 +31,7 @@ from pathlib import Path
 
 project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
 extras = project.get("optional-dependencies", {})
-print("\n".join([*project["dependencies"], *extras.get("redis", []), *extras.get("s3", [])]))
+print("\n".join([*project["dependencies"], *extras.get("redis", []), *extras.get("s3", []), *extras.get("mcp", [])]))
 PY
 
 RUN --mount=type=cache,target=/root/.cache/pip \

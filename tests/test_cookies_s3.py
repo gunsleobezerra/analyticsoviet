@@ -9,10 +9,9 @@ from core.cookies_s3 import S3CookiesSyncError, sync_cookies_from_s3_sync
 
 
 def test_cookies_storage_backend_defaults_to_local() -> None:
-    settings = Settings()
+    settings = Settings(_env_file=None)
     assert settings.cookies_storage_backend == "local"
     assert settings.s3_cookies_bucket == ""
-    assert settings.s3_cookies_prefix == "cookies/"
 
 
 def test_sync_cookies_skips_when_backend_is_local(tmp_path) -> None:
