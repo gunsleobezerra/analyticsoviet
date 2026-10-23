@@ -9,12 +9,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Path, Query
 
 from api.deps import AppState, StateDep
+from api.docs import ERROR_RESPONSES
 from api.urls import resolve_profile_url
 from core.errors import ScrapeError, UnsupportedUrlError
 from core.logging import get_logger
 from db.snapshots import record_result
 from models.schemas import (
-    ErrorResponse,
     Platform,
     ResultStatus,
     ScrapeRequest,

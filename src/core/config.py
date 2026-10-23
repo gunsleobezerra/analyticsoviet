@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     environment: Literal["dev", "prod", "test"] = "dev"
     log_level: str = "INFO"
     api_prefix: str = "/v1"
+    # Optional absolute URL advertised as the first OpenAPI server entry.
+    public_base_url: str | None = None
 
     # ---- http ----
     http_timeout_seconds: float = 20.0
