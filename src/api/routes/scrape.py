@@ -61,7 +61,6 @@ _SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     },
 }
 
-
 @router.post(
     "/scrape",
     response_model=ScrapeResponse,
