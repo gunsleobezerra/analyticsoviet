@@ -144,9 +144,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Model Context Protocol (MCP) SSE endpoint for AI assistants
     try:
+        from mcp.server.transport_security import TransportSecuritySettings
         from mcp_server import mcp
 
-        app.mount("/mcp", mcp.sse_app())
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False,
+            allowed_hosts=["analyticsoviet.leobezerra.com.br", "localhost", "127.0.0.1", "*"],
+            allowed_origins=["*"],
+        )
+        app.mount("/mcp", mcp.sse_app(transport_security=security))
         LOGGER.info("mcp_server_mounted", path="/mcp")
     except Exception as exc:  # pragma: no cover
         LOGGER.warning("mcp_mount_failed", error=str(exc))
