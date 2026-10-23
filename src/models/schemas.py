@@ -452,3 +452,43 @@ class ErrorResponse(BaseModel):
     """Envelope wrapping every non-2xx answer from the API."""
 
     error: ErrorPayload = Field(description="The error details.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": {
+                    "code": "blocked",
+                    "message": "upstream rejected the request",
+                    "platform": "instagram",
+                    "url": "https://www.instagram.com/nasa/",
+                    "detail": {"status_code": 403},
+                }
+            }
+        }
+    }
+
+
+class ServiceInfo(BaseModel):
+    """Service banner returned by ``GET /``."""
+
+    name: str = Field(description="Application name.", examples=["analyticsoviet"])
+    version: str = Field(description="Application version.", examples=["0.1.0"])
+    docs: str = Field(description="URL of the Swagger UI.", examples=["/docs"])
+    redoc: str = Field(description="URL of the ReDoc page.", examples=["/redoc"])
+    openapi: str = Field(description="URL of the OpenAPI document.", examples=["/openapi.json"])
+    api: str = Field(description="Prefix shared by every versioned endpoint.", examples=["/v1"])
+    platforms: list[str] = Field(description="Platforms enabled in this instance.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "analyticsoviet",
+                "version": "0.1.0",
+                "docs": "/docs",
+                "redoc": "/redoc",
+                "openapi": "/openapi.json",
+                "api": "/v1",
+                "platforms": ["youtube", "tiktok", "instagram", "facebook"],
+            }
+        }
+    }
