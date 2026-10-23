@@ -112,6 +112,7 @@ class HttpClient:
         self._breaker = CircuitBreaker(
             failure_threshold=settings.breaker_failure_threshold,
             cooldown_seconds=settings.breaker_cooldown_seconds,
+            enabled=settings.breaker_enabled,
         )
         self._cookie_jars: dict[str, httpx.Cookies] = {}
         self._ua_by_platform: dict[str, str] = {}
@@ -206,7 +207,7 @@ class HttpClient:
             await self.start()
         assert self._client is not None
 
-        if not self._breaker.allow(platform):
+        if self.settings.breaker_enabled and not self._breaker.allow(platform):
             raise CircuitOpenError(
                 f"circuit open for {platform}; retry later",
                 platform=platform,

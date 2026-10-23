@@ -74,8 +74,9 @@ class Settings(BaseSettings):
     concurrency_facebook: int = 2
 
     # ---- circuit breaker ----
+    breaker_enabled: bool = False
     breaker_failure_threshold: int = 5
-    breaker_cooldown_seconds: int = 300
+    breaker_cooldown_seconds: int = 10
 
     # ---- storage ----
     database_url: str = "sqlite+aiosqlite:///./data/analyticsoviet.db"
