@@ -392,11 +392,50 @@ class HealthResponse(BaseModel):
     )
     platforms: list[str] = Field(default_factory=list, description="Platforms enabled in this instance.")
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "status": "ok",
+                "version": "0.1.0",
+                "environment": "prod",
+                "uptime_seconds": 812.431,
+                "cache": {"backend": "redis", "hits": 1284, "misses": 96, "entries": 412},
+                "breakers": {
+                    "youtube": "closed",
+                    "tiktok": "closed",
+                    "instagram": "half_open",
+                    "facebook": "open",
+                },
+                "platforms": ["youtube", "tiktok", "instagram", "facebook"],
+            }
+        }
+    }
+
 
 class PlatformsResponse(BaseModel):
     """Capability matrix for every enabled platform."""
 
     platforms: list[PlatformCapabilities] = Field(description="One entry per platform.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "platforms": [
+                    {
+                        "platform": "youtube",
+                        "supports_profile": True,
+                        "supports_posts": True,
+                        "supports_single_post": True,
+                        "html_reliability": "high",
+                        "profile_fields": ["followers", "posts"],
+                        "post_fields": ["views", "likes", "comments"],
+                        "requires_cookies_for": [],
+                        "notes": "ytInitialData is stable; yt-dlp is an optional fallback.",
+                    }
+                ]
+            }
+        }
+    }
 
 
 class ErrorPayload(BaseModel):
