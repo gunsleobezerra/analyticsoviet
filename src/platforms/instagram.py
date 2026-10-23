@@ -221,6 +221,9 @@ class InstagramAdapter(BaseAdapter):
         html = response.text
         login_wall = _looks_like_login_wall(html)
         if login_wall:
+            # Instagram answered 200 with an empty shell: feed the breaker so a
+            # run of blocked profiles stops early instead of retrying each one.
+            self.http.record_block(self.platform.value)
             result.add_warning("instagram served a login wall")
 
         profile = _profile_from_html(html, handle)
@@ -238,10 +241,16 @@ class InstagramAdapter(BaseAdapter):
                     url=f"https://www.instagram.com/{handle}/",
                     extra={"via": "login_wall"},
                 )
+                challenge = _looks_like_challenge(html) or self.http.has_cookies(
+                    self.platform.value
+                )
                 result.error = {
-                    "code": "auth_required",
+                    "code": "blocked" if challenge else "auth_required",
                     "message": (
-                        "Instagram no longer exposes profile counters to anonymous "
+                        "Instagram is challenging this IP (checkpoint page); "
+                        "back off or use a residential proxy"
+                        if challenge
+                        else "Instagram no longer exposes profile counters to anonymous "
                         "clients; provide session cookies via COOKIES_INSTAGRAM_FILE"
                     ),
                 }
@@ -376,6 +385,19 @@ def _looks_like_login_wall(html: str) -> bool:
         return False
     lowered = html[:4000].lower()
     return "instagram" in lowered
+
+
+def _looks_like_challenge(html: str) -> bool:
+    """True when the shell is an anti-bot challenge rather than a plain wall.
+
+    Challenge pages expose ``checkpoint``/``challenge_required`` handlers and
+    mean the IP is flagged; a plain login wall only means the session is missing.
+    """
+    lowered = html.lower()
+    return any(
+        marker in lowered
+        for marker in ("checkpoint", "challenge_required", "/challenge/")
+    )
 
 
 _PLACEHOLDER_TITLES = {"instagram", "instagram photos and videos", "login • instagram"}

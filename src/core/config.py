@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     cache_ttl_profile_seconds: int = 900
     cache_ttl_posts_seconds: int = 900
     cache_ttl_post_seconds: int = 3600
+    # Blocked/rate-limited results are cached only briefly so the service
+    # recovers on its own once the upstream stops gating anonymous traffic.
+    cache_ttl_blocked_seconds: int = 60
     cache_max_entries: int = 5000
     redis_url: str = "redis://localhost:6379/0"
 

@@ -185,6 +185,15 @@ class HttpClient:
     def has_cookies(self, platform: str) -> bool:
         return self._cookies_for(platform) is not None
 
+    def record_block(self, platform: str) -> None:
+        """Count an application-level block against the platform breaker.
+
+        A login wall or challenge page arrives as ``200 OK``, so the status
+        based breaker never sees it. Adapters call this to make repeated soft
+        blocks trip the breaker the same way a 429 does.
+        """
+        self._breaker.record_failure(platform)
+
     def user_agent(self, platform: str) -> str:
         ua = self._ua_by_platform.get(platform)
         if ua is None:

@@ -79,3 +79,20 @@ def test_post_from_og_returns_none_without_description() -> None:
 def test_post_from_media_node_rejects_garbage() -> None:
     assert ig._post_from_media_node(None) is None
     assert ig._post_from_media_node("nope") is None
+
+
+def test_captured_wall_is_detected_as_challenge(wall_html: str) -> None:
+    """The stored fixture is a checkpoint page, not just a logged-out shell."""
+    assert ig._looks_like_challenge(wall_html) is True
+
+
+def test_plain_login_page_is_not_a_challenge() -> None:
+    html = '<html><head><title>Login • Instagram</title></head><body></body></html>'
+    assert ig._looks_like_challenge(html) is False
+
+
+@pytest.mark.parametrize(
+    "marker", ["checkpoint", "challenge_required", "/challenge/"]
+)
+def test_challenge_markers_are_recognised(marker: str) -> None:
+    assert ig._looks_like_challenge(f"<html><script>{marker}</script></html>") is True

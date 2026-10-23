@@ -23,6 +23,12 @@ UrlKind = Literal["profile", "post"]
 
 _HANDLE_RE = re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
 
+# Error codes that mean "upstream gated us", not "the data does not exist".
+# Caching those for the full profile TTL makes an outage look permanent.
+_BLOCKING_ERROR_CODES = frozenset(
+    {"auth_required", "blocked", "rate_limited", "circuit_open"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedUrl:
@@ -109,8 +115,13 @@ class BaseAdapter(ABC):
                     return result
 
         result = await factory()
-        if result.status != ResultStatus.failed:
-            await self.cache.set(key, result.model_dump(mode="json"), ttl_seconds)
+        if result.status == ResultStatus.failed:
+            return result
+        ttl = ttl_seconds
+        error = result.error
+        if isinstance(error, dict) and error.get("code") in _BLOCKING_ERROR_CODES:
+            ttl = min(ttl_seconds, self.settings.cache_ttl_blocked_seconds)
+        await self.cache.set(key, result.model_dump(mode="json"), ttl)
         return result
 
     @staticmethod
