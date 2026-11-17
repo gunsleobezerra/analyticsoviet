@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     # ---- feature toggles ----
     enable_ytdlp_fallback: bool = True
 
+    # ---- auth and secrets ----
+    # These three are environment-only: a value in the database could switch off
+    # authentication or swap the key that decrypts every stored secret, so the
+    # panel may show them but never write them.
+    api_auth_enabled: bool = False
+    mcp_enabled: bool = False
+    app_encryption_key: str | None = None
+
     def cookies_file_for(self, platform: str) -> Path | None:
         """Return the configured Netscape cookie file for a platform, if it exists."""
         explicit: Path | None = getattr(self, f"cookies_{platform}_file", None)

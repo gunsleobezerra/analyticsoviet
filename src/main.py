@@ -145,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Model Context Protocol (MCP) SSE endpoint for AI assistants
     try:
         from mcp.server.transport_security import TransportSecuritySettings
+
         from mcp_server import mcp
 
         security = TransportSecuritySettings(

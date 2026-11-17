@@ -85,6 +85,8 @@ def test_sync_cookies_raises_on_failure(tmp_path) -> None:
     mock_boto3.client.return_value = mock_s3_client
     mock_s3_client.get_paginator.side_effect = Exception("S3 access denied")
 
-    with patch.dict("sys.modules", {"boto3": mock_boto3, "botocore.config": MagicMock()}):
-        with pytest.raises(S3CookiesSyncError, match="Failed to sync cookies from S3"):
-            sync_cookies_from_s3_sync(settings)
+    with (
+        patch.dict("sys.modules", {"boto3": mock_boto3, "botocore.config": MagicMock()}),
+        pytest.raises(S3CookiesSyncError, match="Failed to sync cookies from S3"),
+    ):
+        sync_cookies_from_s3_sync(settings)

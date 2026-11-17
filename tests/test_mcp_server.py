@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_server import list_platforms, profile_history, scrape_url
+from mcp_server import list_platforms, scrape_url
 
 
 @pytest.mark.asyncio
