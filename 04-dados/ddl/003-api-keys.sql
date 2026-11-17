@@ -1,0 +1,26 @@
+-- 003 — chaves de API da api pública (#13).
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    prefix          TEXT NOT NULL,
+    key_hash        TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    created_by      TEXT REFERENCES admin_users(id) ON DELETE SET NULL,
+    expires_at      TEXT,
+    revoked_at      TEXT,
+    revoked_reason  TEXT,
+    last_used_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_api_keys_prefix ON api_keys (prefix);
+-- Busca da autenticação: sha256 do valor apresentado, igualdade exata.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_api_keys_hash ON api_keys (key_hash);
+
+CREATE TABLE IF NOT EXISTS api_key_scopes (
+    api_key_id  TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+    scope       TEXT NOT NULL CHECK (scope IN ('read:metrics', 'write:scrape', 'admin')),
+    PRIMARY KEY (api_key_id, scope)
+);
+
+-- Índice parcial que evita varrer chaves revogadas na listagem do painel.
+CREATE INDEX IF NOT EXISTS ix_api_keys_active ON api_keys (created_at DESC) WHERE revoked_at IS NULL;

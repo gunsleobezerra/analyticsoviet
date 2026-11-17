@@ -1,0 +1,14 @@
+-- 04-dados/ddl — DDL de REFERÊNCIA para SQLite 3.37+ (imagem roda Python 3.12).
+-- NÃO executar: quem implementa roda. A Modeladora de Dados não executa DDL.
+--
+-- Regras deste diretório:
+--  * ordem numérica = ordem de aplicação;
+--  * cada arquivo é idempotente o suficiente para ser registrado em schema_migrations
+--    (a aplicação abre transação, aplica o arquivo, grava a versão);
+--  * o DDL precisa casar com os modelos SQLAlchemy de src/db/models.py —
+--    divergência entre os dois gera comportamento diferente entre banco novo
+--    (create_all) e banco migrado. Teste: banco novo via create_all vs banco
+--    migrado devem ter o mesmo `PRAGMA table_info` e os mesmos índices.
+--  * horários: TEXT no formato que o SQLAlchemy grava em SQLite
+--    ('YYYY-MM-DD HH:MM:SS.ffffff'), sempre UTC por convenção.
+--    Confirmar o formato real antes: SELECT captured_at FROM profile_snapshots LIMIT 5;
