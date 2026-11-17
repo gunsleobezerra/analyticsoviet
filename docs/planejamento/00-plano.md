@@ -1,122 +1,134 @@
-# Plano de entrega — painel de configuração + integração Meta
+# Plano de entrega — painel de configuração + integração Meta + autenticação da API
 
-Versão 1 (consolidação do líder). Repo: `gunsleobezerra/analyticsoviet`, base `main@d1c42dc`.
-Documento de coordenação: define ordem, donos e decisões. As especificações por frente são os documentos dos especialistas (`docs/especificacao/painel-config.md` e `docs/especificacao/meta.md`).
+Versão 2. Repo: `gunsleobezerra/analyticsoviet`, base `main@d1c42dc`.
+Documento de coordenação: define escopo, ordem, donos, dependências e decisões. As especificações por frente estão em `docs/especificacao/`.
+
+Mudança da v1 para a v2: entra a issue **#13 (autenticação da API pública)**, o escopo de autenticação de `/v1` deixa de ser "fora de escopo", a janela de Insights e a lista de campos de webhook são fechadas, e as especificações dos especialistas passam a ser versionadas neste repositório.
 
 ## Objetivo
 
-Entregar duas especificações implementáveis sobre a API FastAPI atual:
-1. `/admin` — configuração editável pela tela, com precedência banco > ambiente > padrão, segredos protegidos, aplicação a quente do que for seguro e aviso de reinício para o resto.
+Entregar três especificações implementáveis sobre a API FastAPI atual:
+1. `/admin` — configuração editável pela tela, com precedência banco > ambiente > padrão, segredos cifrados, aplicação a quente do que for seguro e aviso de reinício para o resto.
 2. Integração oficial Meta (Graph API + Marketing API) — OAuth com cofre de tokens, Insights de Instagram profissional e Página, Marketing API somente leitura, webhooks e controle de quota, com o scraping atual como fallback.
+3. `/v1/*` — autenticação por chave de API, separada da sessão do painel.
 
 ## Fora de escopo
 
 - Implementação, código de aplicação, build e deploy. Outro agente implementa a partir da especificação.
-- Escrita na conta de anúncios (pausar, ajustar orçamento) — issue #12 é somente leitura.
+- Escrita na conta de anúncios (pausar, ajustar orçamento) — #12 é somente leitura.
 - Instagram pessoal via API oficial (a Meta não expõe; segue scraping).
-- Autenticação da API pública `/v1/*` — continua aberta como hoje.
-- Alertas por WhatsApp em bloqueio de conta (#11) — vira issue separada, dono Nó, se o Leonardo quiser.
-- Substituir o scraping: ele permanece como fallback e para plataformas sem API oficial (TikTok, YouTube por HTML).
+- OAuth2/JWT, IP allowlist por chave, multi-tenant, RBAC/multi-usuário, 2FA.
+- Alertas por WhatsApp em bloqueio de conta (#11) — issue separada, dono Nó, se o Leonardo quiser.
+- Substituir o scraping: ele permanece como fallback e para plataformas sem API oficial.
 
 ## Método
 
-Kanban com limite de trabalho em andamento (uma frente por especialista por vez), porque não há cadência de sprint acordada e o gargalo real é a dependência MetaNO → arquitetura → modelo → revisão. Sem estimativa em pontos; ordem e bloqueio explícitos.
+Kanban com WIP 1 por especialista, porque não há cadência de sprint acordada e o gargalo é a cadeia MetaNO → arquitetura → modelo → revisão. Sem estimativa em pontos; ordem e bloqueio explícitos.
 
 ## Divisão e donos
 
 | Item | Dono | Artefato |
 |---|---|---|
-| Casos de uso e critérios testáveis das duas frentes; requisitos faltantes | Analista de Requisitos | `docs/especificacao/requisitos.md` |
-| C4 container/componente, pontos de integração em `src/main.py`/`src/api/deps.py`, config quente/fria, fluxo OAuth, fallback Graph→scraping | Arquiteto de Software | `docs/especificacao/arquitetura.md` |
-| Tabelas novas, índices, migração do SQLite atual (hoje só `create_all` em `src/db/session.py`) | Modelador de Dados | `docs/especificacao/modelo-dados.md` |
-| Versão da Graph API, permissões por endpoint, tokens e renovação, quota, requisitos de webhook, App Review | MetaNO | `docs/especificacao/meta-fatos.md` |
-| Frontend, hash de senha, criptografia de token, versionamento de schema, o que não construir | Tech Lead | `docs/especificacao/decisoes-tecnicas.md` |
-| Revisão de tudo, furos e critérios não testáveis | Revisor de Especificação | parecer por documento |
+| Casos de uso e critérios testáveis | Analista de Requisitos | `docs/especificacao/requisitos/` |
+| C4, integração em `src/main.py`/`src/api/deps.py`, config quente/fria, OAuth, fallback | Arquiteto de Software | `docs/especificacao/arquitetura/` |
+| Tabelas, índices, migração do SQLite atual | Modelador de Dados | branch `dados/modelo-config-meta`, `04-dados/` |
+| Versão da Graph API, permissões, tokens, quota, webhook, App Review | MetaNO | `docs/especificacao/meta-fatos.md` |
+| Frontend, hash de senha, criptografia, versionamento de schema, o que não construir | Tech Lead | `docs/especificacao/decisoes-tecnicas.md` |
+| Revisão de tudo | Revisor de Especificação | branch `revisao/especificacao-config-meta` |
 | Consolidação, conflito, ordem, escopo das issues | Líder de Planejamento | este documento |
 
 ## Ordem de execução e dependências
 
 ```mermaid
 flowchart LR
-  subgraph F0[Fase 0 - fatos e decisões]
-    M[#0 MetaNO: fatos da Meta] --> T[#0 Tech Lead: decisões técnicas]
+  subgraph F0[Fase 0]
+    M[MetaNO: fatos da Meta] --> T[Tech Lead: decisões técnicas]
   end
-  subgraph F1[Frente Config]
-    C6[#6 camada persistida] --> C4[#4 auth e auditoria]
+  subgraph F1[Frente Config e API]
+    C6[#6 config persistida] --> C4[#4 auth do painel e auditoria]
     C4 --> C3[#3 API admin]
-    C3 --> C7[#7 painel web]
-    C3 --> C5[#5 aplicação a quente]
-    C7 --> C5
+    C3 --> C13[#13 chave de API]
+    C13 --> C5[#5 aplicação a quente]
+    C5 --> C7[#7 painel web]
+    C13 -.seção de chaves.-> C7
   end
   subgraph F2[Frente Meta]
     C6 --> M10[#10 OAuth e cofre]
     M --> M10
     T --> M10
     M10 --> M11[#11 quota, backoff, breaker]
-    M11 --> M8[#8 adapter Graph + Insights]
+    M11 --> M8[#8 fonte Graph + Insights]
     M11 --> M12[#12 Marketing API]
     M8 --> M9[#9 webhooks]
+    C13 -.rotas isentas.-> M9
   end
-  C3 --> M10
 ```
 
-Sequência recomendada (uma fila única, para não travar revisão):
+Sequência recomendada (fila única, para não travar revisão):
 
-1. **Fase 0** — MetaNO publica fatos; Tech Lead fecha as decisões técnicas. Nada de spec de Meta antes disso; nada de modelo de dados antes da decisão de migração.
-2. **#6** camada de configuração persistida (base das duas frentes; define precedência, classificação quente/fria e metadados por campo).
-3. **#4** autenticação e auditoria (precede qualquer escrita administrativa).
-4. **#3** API administrativa de leitura/escrita com validação e segredos mascarados (auditoria de #4 é gravada aqui).
-5. **#10** OAuth Meta + cofre de tokens (depende de #6 para a chave de criptografia e de #3 para cadastrar app id/secret pela tela).
-6. **#7** painel web e **#5** aplicação a quente, nesta ordem: a tela precisa da API de #3 e o aviso de "exige reinício" depende da classificação de #5.
-7. **#11** quota/backoff/breaker da Meta (antes de qualquer volume de chamadas de #8/#12).
-8. **#8** adapter Graph + Insights (fallback para scraping) e **#12** Marketing API podem andar em paralelo, mesma base de cliente e limitador.
-9. **#9** webhooks, por último: depende de #10 (contas e tokens), #11 (retentativa) e #8 (gravar snapshot com origem).
+1. **Fase 0** — MetaNO publica os fatos; Tech Lead fecha as decisões técnicas.
+2. **#6** camada de configuração persistida e runner de migração.
+3. **#4** autenticação e auditoria do painel.
+4. **#3** API administrativa com validação e segredos mascarados.
+5. **#13** chave de API: backend + CLI primeiro; seção do painel depois de #7.
+6. **#5** aplicação a quente, com os limites por chave já existentes.
+7. **#7** painel web, incluindo o item de navegação de chaves.
+8. **#10** OAuth Meta + cofre de tokens.
+9. **#11** quota, backoff e breaker por conta.
+10. **#8** fonte Graph + Insights e **#12** Marketing API em paralelo.
+11. **#9** webhooks.
 
-Regra de merge: cada issue em sua branch `feat/<numero>-<slug>` ou `docs/<numero>-<slug>`, parecer do revisor registrado na issue, merge na `main` só depois do parecer. A ordem acima é também a ordem de merge.
+Merge na `main` só com parecer do revisor, na mesma ordem.
 
-## Decisões fechadas (seção "Aberto" das issues)
+## Decisões fechadas
 
-Fechadas pelo líder, com base no código; as que dependem de fato externo ficam marcadas.
+### Configuração e painel (#3–#7)
 
-- **#6 segredos**: guardar no banco criptografados com chave vinda do ambiente (`CONFIG_SECRET_KEY`), não apenas indicar presença no `.env`. Sem a chave, campos sensíveis ficam somente leitura e o painel mostra o motivo. Motivo: o painel precisa cadastrar app secret da Meta; exigir edição de arquivo contradiz o objetivo da frente.
-- **#6 histórico de overrides**: fora desta entrega. A auditoria de #4 já guarda valor anterior e novo; rollback automático fica para depois.
-- **#5 proxy e timeouts HTTP**: **frios** nesta entrega (exigem reinício). Quentes: 5 TTLs de cache, rate limit e concorrência por plataforma, parâmetros do breaker, user agents, `scrape_max_urls`, `scrape_default_posts`, `enable_ytdlp_fallback`, `log_level`, `public_base_url`, `youtube_api_key` e credenciais Meta. Motivo: recriar `HttpClient` em runtime com requisições em voo é o maior risco de estado misto do escopo.
-- **#5 invalidação de cache ao mudar TTL**: limpar as chaves da plataforma afetada, não só passar a usar o TTL novo.
-- **#4 usuário**: um único administrador nesta entrega. Senha inicial por variável de ambiente, troca obrigatória no primeiro acesso, hash com a biblioteca que o Tech Lead indicar (recomendação: `argon2-cffi`).
-- **#4 TLS**: o serviço fica atrás de proxy reverso (Coolify). Cookie `Secure` sempre em `environment=prod`, confiando em `--proxy-headers` já presente no `CMD` do `Dockerfile`.
-- **#7 tema**: layout claro, uma coluna no celular, sem tema escuro. Operador é o Leonardo; textos de ajuda em primeira pessoa do operador, sem jargão.
-- **#7 teste de conexão**: apenas leitura e barato — S3 (listar prefixo), Redis (ping), YouTube (1 chamada com a chave), Meta (chamada a `/me` com o token da conta conectada). Nunca testar Meta com app secret.
-- **#12 moeda e fuso**: usar os da conta de anúncios e ecoar na resposta (`currency`, `timezone_name`); não forçar `America/Sao_Paulo`. Motivo: forçar fuso muda a fronteira do dia e o gasto deixa de bater com o Gerenciador de Anúncios.
-- **#12 resumo padrão**: gasto, impressões, cliques, CTR, CPC, CPM e "resultado" com o tipo de resultado declarado. Conversas iniciadas entram como métrica opcional, por depender do objetivo da campanha.
-- **#8 janela padrão de Insights**: 30 dias, com parâmetro explícito; 7 e 28 disponíveis.
-- **#9 fila**: em banco, na mesma tabela de eventos, sem nova infraestrutura. Redis já existe no compose, mas uma fila em Redis traria semântica de entrega e perda que o time não vai operar nesta entrega.
-- **#9 campos de webhook**: `comments`, `mentions` e `feed` da Página; `comments` e `mentions` do Instagram. `messages` fora (exige permissões de Messenger e revisão adicional).
-- **#11 limite**: dinâmico pelo cabeçalho de uso da Meta quando existir, com teto conservador próprio (fração da quota conhecida) como piso de segurança. Percentual exato depende do MetaNO.
+- Precedência banco > ambiente > padrão. Segredos cifrados no banco (AES-256-GCM, chave `APP_ENCRYPTION_KEY` só no ambiente e `read_only` no painel); sem a chave, escrita de segredo é recusada.
+- Frio (exige reinício): `database_url`, `api_prefix`, `environment`, `cache_backend`, `redis_url`, backend e caminhos de cookies, `proxy_url`, timeouts e conexões HTTP, `public_base_url`, `API_AUTH_ENABLED`, `MCP_ENABLED`.
+- Quente: 5 TTLs de cache, rate limit e concorrência por plataforma, limites por chave de API, breaker, user agents, `scrape_max_urls`, `scrape_default_posts`, `enable_ytdlp_fallback`, `log_level`, `youtube_api_key` e credenciais Meta.
+- TTL já gravado não encurta: epoch por família de TTL nas chaves de cache (o cache atual não lista chaves, então "limpar chaves" não é implementável).
+- Um operador; senha inicial por ambiente, hash Argon2id no banco, troca pela tela.
+- `/admin` e `/admin/api` fora de `api_prefix`, no mesmo domínio, fora do OpenAPI público, assets locais sem CDN.
 
-Pendente de terceiro (não fechar por suposição):
+### API pública (#13)
 
-- **#10/#9/#11/#8** — versão vigente da Graph API, permissões exatas, tipos de token e renovação, limites por app/conta/Página, requisitos de verificação de webhook e necessidade de App Review: **MetaNO**.
-- **#8** — se guardar Insights no histórico tem restrição de política: **MetaNO**.
-- **#4** — se o Leonardo quer mais de um operador e se o TLS termina no Coolify: **Leonardo**.
+- Chave por integração, nome identifica; sem chave global. `avk_` + 32 bytes, guardado só SHA-256 + prefixo.
+- Escopos `read:metrics`, `write:scrape`, `admin`; sem OAuth2/JWT nesta fase.
+- Rotas isentas: `/v1/health` (healthcheck), `GET /v1/meta/oauth/callback`, `POST /v1/meta/webhook`. `/v1/system/status` autenticado com `read:metrics`.
+- Revogação vale na requisição seguinte: leitura do banco por requisição, `last_used_at` no máximo 1×/min.
+- Limite por chave: 120 req/min leitura, 30 req/min scraping; contador no cache, nunca escrita por requisição no SQLite.
+- `/mcp` desligado por padrão; ligado, exige a mesma chave.
+- `API_AUTH_ENABLED` é frio: desligar autenticação não pode valer a quente.
+
+### Meta (#8–#12)
+
+- `source="official_api"` + `extra.provider="meta_graph"`; `confidence` alto. Nenhum valor novo no enum de `source`.
+- Fonte Graph injetada no `AdapterContext`; o registry continua `{Platform: adapter}`. Não criar segundo adapter.
+- Insights em formato longo, ausência = linha ausente, nunca zero. Janela padrão **28 dias**, com 7 e 30 disponíveis.
+- Webhooks: Página com `feed`, `comments`, `mentions`; Instagram com `comments`, `mentions`. `messages` fora.
+- Fila em tabela SQLite, worker único com lock de líder, idempotência por `dedupe_key`.
+- Quota: bucket e breaker por conta, não por plataforma. Erro oficial não substitui scraping disponível — cliente recebe 200 com warning.
+- Marketing API só GET, campos explícitos, moeda e fuso da conta ecoados, nunca convertidos.
 
 ## Riscos
 
 | Risco | Impacto | Dono | Mitigação |
 |---|---|---|---|
-| `WEB_CONCURRENCY` > 1 (uvicorn `--workers`): cada processo tem `lru_cache` e `MemoryCache` próprios | Config "a quente" aplicada em um worker e não nos outros; TTL divergente | Arquiteto | Versão de config no banco consultada por requisição (barata, com cache curto) ou pub/sub no Redis; critério de aceite de #6 já exige convergência entre workers |
-| Sem Alembic: schema só por `create_all` | Tabelas novas em banco existente não são criadas; migração de colunas quebra | Tech Lead + Modelador | Decidir versionamento de schema na Fase 0 e incluir migração na issue que cria as tabelas |
-| SQLite com escritas novas (config, auditoria, eventos de webhook) e concorrência | `database is locked` sob carga | Modelador | WAL, transações curtas, fila em tabela com índice; medir no teste de concorrência de #5 |
-| Segredo em log, auditoria ou resposta de erro | Vazamento de token Meta | Analista + Revisor | Critério de aceite explícito em #3, #4, #10 e #11; teste que varre log e dump |
-| App Review demorado ou negado | Integração pronta e não utilizável em produção | MetaNO + Leonardo | MetaNO diz o que exige revisão; se exigir, a entrega inclui o roteiro de submissão e o modo "app em desenvolvimento" com contas de teste |
-| Queda da Graph API ou token revogado | Métricas faltando | Arquiteto | Fallback Graph→scraping já previsto em #8, com `source` e `warnings` no snapshot |
-| Painel exposto sem TLS | Senha e tokens em trânsito | Leonardo | #4 exige `Secure` em prod; confirmar terminação TLS antes de publicar `/admin` |
+| `WEB_CONCURRENCY` > 1: cada worker tem `lru_cache` e `MemoryCache` próprios | Config quente aplicada em um worker só | Arquiteto | Versão em `config_state`, comparação periódica; teste com 2 workers |
+| Sem migração versionada (`create_all` em `src/db/session.py`) | Tabela nova não aparece em produção | Tech Lead + Modelador | Runner SQL na #6, antes de qualquer tabela nova |
+| SQLite recebe escritas novas (config, auditoria, chaves, webhook) | `database is locked` | Modelador | WAL, `busy_timeout`, transações curtas; contadores fora do banco |
+| `API_AUTH_ENABLED=true` sem chave criada | n8n/Make/scripts param no deploy | Leonardo | Subir com `false`, criar chaves, ligar `true` com restart |
+| `enable_history=false` impede o banco de subir | Config e cofre de tokens param | Arquiteto | Banco sempre no boot; só a gravação de histórico atrás da flag |
+| Segredo em log, auditoria ou erro | Vazamento de token Meta | Revisor | Critério explícito em #3, #4, #10, #11, #13 |
+| App Review negado ou demorado | Integração pronta e inutilizável | MetaNO + Leonardo | MetaNO diz o que exige revisão; roteiro de submissão |
+| Painel exposto sem TLS | Senha e tokens em trânsito | Leonardo | `Secure` em prod; confirmar terminação TLS |
 
-## Pendências de escopo que precisam de decisão do Leonardo
+## Pendências de terceiros
 
-1. `/admin` fica no mesmo host público da API ou em porta/host separado? (afeta exposição e TLS)
-2. Uma conta Meta por plataforma ou várias contas/Páginas por instância? (afeta modelo e tela)
-3. Marketing API já nesta entrega ou depois do orgânico estabilizar? (é a issue #12; hoje está no épico #1)
+- **MetaNO:** versão da Graph API, permissões por endpoint, tipos e renovação de token, quota, verificação e assinatura de webhook, App Review, restrição de guardar Insights.
+- **Leonardo:** `/admin` no mesmo host ou separado; uma conta Meta por plataforma ou várias; Marketing API nesta entrega ou depois; TLS/Coolify; retenção de dados; multi-cliente.
 
 ## Próximo passo
 
-Fase 0: MetaNO publica os fatos e o Tech Lead fecha as decisões técnicas. Em paralelo, Analista, Arquiteto e Modelador produzem a especificação de #6 (a base das duas frentes) para o revisor dar o primeiro parecer.
+Fase 0 com MetaNO e Tech Lead; em paralelo, a especificação da #6 vai para o revisor, porque ela destrava a fila inteira.
