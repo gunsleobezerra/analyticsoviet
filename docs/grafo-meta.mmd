@@ -1,0 +1,51 @@
+flowchart TD
+    subgraph CLIENTE["1. Aplicação Cliente"]
+        App["Seu App / Sistema"]
+        Token["Access Token<br/>(Define permissões e escopos)"]
+    end
+
+    subgraph ENDPOINT["2. Ponto de Entrada (HTTP/REST)"]
+        Host["https://graph.facebook.com"]
+        Version["Versão da API<br/>(ex.: /v27.0)"]
+        Metodos["Métodos HTTP:<br/>• GET (Leitura)<br/>• POST (Publicação/Edição)<br/>• DELETE (Exclusão)"]
+    end
+
+    subgraph GRAFO["3. O Grafo Social da Meta"]
+        direction TB
+
+        subgraph NOS["Nós (Nodes) — Objetos Individuais com ID"]
+            UserNode["Nó: Usuário<br/>(/me ou /{user-id})"]
+            PageNode["Nó: Página<br/>(/{page-id})"]
+            PostNode["Nó: Postagem<br/>(/{post-id})"]
+        end
+
+        subgraph CAMPOS["Campos (Fields) — Atributos do Nó (?fields=...)"]
+            UserFields["Propriedades:<br/>id, name, email, picture"]
+            PostFields["Propriedades:<br/>id, message, created_time"]
+        end
+
+        subgraph ARESTAS["Arestas (Edges) — Conexões entre Nós"]
+            EdgePhotos["/{user-id}/photos"]
+            EdgeFeed["/{page-id}/feed"]
+            EdgeComments["/{post-id}/comments"]
+        end
+
+        UserNode -.-> UserFields
+        UserNode -->|Aresta| EdgePhotos
+        PageNode -->|Aresta| EdgeFeed
+        EdgeFeed --> PostNode
+        PostNode -.-> PostFields
+        PostNode -->|Aresta| EdgeComments
+    end
+
+    subgraph RESPOSTA["4. Resposta"]
+        JSON["JSON Estruturado<br/>(Dados solicitados ou ID do objeto)"]
+    end
+
+    App -->|Envia requisição com Token| Host
+    Token -->|Autoriza| Host
+    Host --> Version
+    Version --> Metodos
+    Metodos -->|Acessa Nó ou Aresta| GRAFO
+    GRAFO --> RESPOSTA
+    RESPOSTA -->|Retorna| App
