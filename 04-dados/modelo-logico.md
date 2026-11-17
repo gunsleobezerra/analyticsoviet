@@ -48,7 +48,23 @@ Valor escolhido pelo operador, por cima do ambiente.
 
 Sem `value_type`: o tipo é o do campo em `src/core/config.py`. `config_overrides` não aceita chave que não exista em `Settings` (validação na aplicação), e chave órfã após um rename vira aviso em `GET /admin/api/config`, nunca erro de boot.
 
-Nenhuma coluna de segredo. Campo sensível é recusado com 422 (`META_APP_SECRET`, `S3_SECRET_ACCESS_KEY`, `S3_ACCESS_KEY_ID`, `S3_SESSION_TOKEN`, `YOUTUBE_API_KEY`, `proxy_url` com credencial embutida). Se o Tech Lead decidir guardar segredo, entram `secret_ciphertext BLOB`, `secret_nonce BLOB`, `secret_key_version INTEGER` e `value_json` passa a valer só para campo não sensível.
+Nenhuma coluna de segredo aqui: campo sensível é gravado em `config_secrets`, tabela separada. Motivo: `config_overrides` é lida em claro e devolvida por `GET`; se o ciphertext morasse na mesma tabela, um `SELECT *` no código de leitura de config devolveria blob no lugar de valor. `PATCH` de campo sensível grava nas duas tabelas na mesma transação (ou nenhuma).
+
+### `config_secrets`
+Campo sensível escolhido pelo operador (`META_APP_SECRET`, `S3_SECRET_ACCESS_KEY`, `S3_ACCESS_KEY_ID`, `S3_SESSION_TOKEN`, `YOUTUBE_API_KEY`). AES-256-GCM, chave `APP_ENCRYPTION_KEY` só no ambiente e `read_only` no painel.
+
+| Coluna | Tipo | Nulo | Regra |
+|---|---|---|---|
+| `key` | TEXT | não | PK; mesmo formato de `config_overrides.key` |
+| `ciphertext` | BLOB | não | saída do GCM |
+| `nonce` | BLOB | não | 12 bytes, único por operação; `CHECK (length(nonce) = 12)` |
+| `key_version` | INTEGER | não | permite rotação manual (`APP_ENCRYPTION_KEY_OLD`) sem perder segredo |
+| `aad` | TEXT | não | default `'config_secret'`; `CHECK (aad = 'config_secret')` — impede aceitar ciphertext de token Meta como segredo de config |
+| `updated_at` | TEXT | não | |
+| `updated_by` | TEXT | não | FK `admin_users(id)` `ON DELETE RESTRICT` |
+| `updated_ip` | TEXT | sim | |
+
+AAD é a defesa contra troca de contexto: o mesmo par chave/versão decifra `meta_token` e `config_secret`, mas o texto associado diferente faz o GCM falhar. Sem `aad` gravado não há como provar isso na leitura.
 
 ### `admin_users`
 
@@ -56,14 +72,16 @@ Nenhuma coluna de segredo. Campo sensível é recusado com 422 (`META_APP_SECRET
 |---|---|---|---|
 | `id` | TEXT | não | PK |
 | `username` | TEXT | não | UNIQUE `COLLATE NOCASE` |
-| `password_hash` | TEXT | não | saída da biblioteca escolhida pelo Tech Lead |
-| `password_algo` | TEXT | não | `CHECK IN ('argon2id','bcrypt')` |
+| `password_hash` | TEXT | não | Argon2id (`argon2-cffi`), `memory_cost=19456`, `time_cost=2`, `parallelism=1`; parâmetros ficam dentro do próprio hash codificado |
+| `password_algo` | TEXT | não | `CHECK IN ('argon2id')` — fechado; bcrypt não entra |
 | `must_change_password` | INTEGER | não | default 1 |
 | `is_active` | INTEGER | não | default 1 |
 | `password_changed_at` | TEXT | sim | |
 | `created_at`, `updated_at` | TEXT | não | |
 
 Usuário nunca é apagado com histórico: `is_active = 0`. Apagar usuário apagaria rastro de auditoria; a auditoria referencia `ON DELETE RESTRICT`.
+
+`ADMIN_PASSWORD_HASH` do ambiente é só seed da primeira linha: troca pela tela grava em `admin_users` e revoga as sessões. Depois do seed, o banco é a fonte da verdade da senha — o ambiente não pode voltar a sobrescrever.
 
 ### `admin_sessions`
 Sessão do painel. Guarda o **hash** do token do cookie, nunca o token.
@@ -113,6 +131,8 @@ Append-only. Sem UPDATE nem DELETE pela aplicação.
 
 `rejected` existe para registrar tentativa recusada (ex.: valor inválido, campo sensível) sem gravar override — a #4 pede rastro do que foi tentado.
 
+`CHECK (is_secret = 0 OR ((old_value IS NULL OR old_value = '***') AND (new_value IS NULL OR new_value = '***')))` está no DDL: a garantia de "segredo nunca em claro na auditoria" deixa de depender de o código lembrar de mascarar.
+
 ### Frente A — o que **não** vira tabela
 
 - **Contadores de rate limit por chave de API e por conta Meta**: memória/Redis. Uma escrita por requisição no SQLite serializa o serviço inteiro (`src/db/session.py` abre uma conexão de escrita por sessão).
@@ -129,8 +149,8 @@ Append-only. Sem UPDATE nem DELETE pela aplicação.
 |---|---|---|---|
 | `id` | TEXT | não | PK |
 | `name` | TEXT | não | rótulo humano ("n8n produção") |
-| `prefix` | TEXT | não | UNIQUE; 12–16 caracteres exibidos na listagem (`avk_live_ab12`) |
-| `key_hash` | TEXT | não | UNIQUE; sha256 hex do valor completo; busca é por aqui |
+| `prefix` | TEXT | não | UNIQUE; `avk_` + 8 caracteres exibidos (`avk_live_ab12`); `CHECK (prefix LIKE 'avk\_%' ESCAPE '\')` |
+| `key_hash` | TEXT | não | UNIQUE; sha256 hex (64 chars) do valor completo; `CHECK` de formato; busca é por aqui. SHA-256, não Argon2: o valor é 32 bytes aleatórios, não senha de humano |
 | `created_at` | TEXT | não | |
 | `created_by` | TEXT | sim | FK `admin_users(id)` `ON DELETE SET NULL` |
 | `expires_at` | TEXT | sim | `NULL` = não expira |
@@ -147,7 +167,11 @@ Append-only. Sem UPDATE nem DELETE pela aplicação.
 
 Escopo em tabela filha, não JSON: é conjunto consultado a cada requisição autenticada e precisa de `CHECK` por valor (1FN). Custo: um `JOIN` em tabela de dezenas de linhas.
 
-Revogação imediata sem restart (critério da #13) é consequência de o `key_hash` ser lido do banco a cada requisição; se houver cache de chave, ele precisa ter TTL ≤ 30 s ou invalidação explícita, senão o critério falha. Isso é decisão de arquitetura, registrada aqui porque muda o modelo (tabela de invalidação) se optarem por cache longo.
+Revogação imediata sem restart (critério da #13) é consequência de o `key_hash` ser lido do banco a cada requisição — decisão do Tech Lead: sem cache de chave. Se um dia houver cache, ele precisa de TTL ≤ 30 s ou invalidação explícita, senão o critério falha e o modelo precisa de tabela de invalidação.
+
+Escopos e rate limit por chave: `read:metrics` → 120 req/min, `write:scrape` → 30 req/min. Os contadores **não** estão nesta tabela (ver "o que não vira tabela"). Chave sem escopo é impossível por PK composta; chave sem nenhuma linha em `api_key_scopes` é rejeitada na aplicação (não é representável como constraint).
+
+Rotas isentas de chave (`/v1/health` para o healthcheck do compose/Dockerfile, callback OAuth, webhook da Meta) não mudam o modelo: são lista em código. `/v1/system/status` exige chave; `/mcp` fica desligado por padrão e, ligado, exige chave com escopo `admin`.
 
 ---
 
@@ -161,7 +185,7 @@ Uma linha por autorização OAuth concluída.
 | `id` | TEXT | não | PK |
 | `fb_user_id` | TEXT | não | id do usuário Facebook que autorizou; UNIQUE (ver nota multi-tenant) |
 | `fb_user_name` | TEXT | sim | |
-| `graph_version` | TEXT | não | versão usada na conexão (`v23.0` ou a que o MetaNO confirmar) |
+| `graph_version` | TEXT | não | versão usada na conexão; MetaNO confirmou **v27.0** vigente desde 04/11/2026 |
 | `status` | TEXT | não | `CHECK IN ('active','revoked','expired','error')` |
 | `connected_at` | TEXT | não | |
 | `last_checked_at` | TEXT | sim | última verificação de token em `/me` |
@@ -286,10 +310,11 @@ Tabela existente; nada é removido, só acrescentado (nullable, sem default bloq
 | `period_end` | TEXT | sim | |
 | `inserted_by` | TEXT | sim | `CHECK IN ('request','webhook','job','migration')`; `NULL` em linha antiga = `request` |
 | `dedupe_key` | TEXT | sim | UNIQUE; só webhook; `NULL` nas demais |
+| `provider` | TEXT | sim | qual API produziu o dado (`meta_graph`); `NULL` = scraping. Não confundir com `source` |
 
-`source` e `confidence` já existem (`src/db/models.py`) e passam a receber `meta_graph` / `meta_webhook` — valor novo de enum no contrato (`src/models/schemas.py`), **sem DDL**. Linhas antigas com `official_api` continuam válidas.
+`source` **não** ganha valor novo: continua o enum de `src/models/schemas.py` (`html`, `embedded_json`, `official_api`, `oembed`, `ytdlp`). Dado oficial grava `source='official_api'` + `provider='meta_graph'`, exatamente como o contrato do `ScrapeResult` (`extra.provider`). Isso evita divergência entre o enum do Pydantic e um valor que só existe no banco — divergência que a revisão apontou.
 
-`inserted_by` é distinto de `source`: `source` diz de onde veio o dado, `inserted_by` diz quem escreveu (requisição, webhook, job de coleta). Sem isso não se responde "esse ponto veio de webhook duplicado ou de leitura?".
+Três colunas, três perguntas distintas: `source` = tipo de fonte; `provider` = qual API; `inserted_by` = quem escreveu (requisição, webhook, job). Sem `inserted_by` não se responde "esse ponto veio de webhook duplicado ou de leitura?"; sem `provider` não se distingue Meta de YouTube Data API no futuro.
 
 ### `profile_insight_snapshots`
 Métrica de período por conta conectada, formato longo.
@@ -302,7 +327,7 @@ Métrica de período por conta conectada, formato longo.
 | `value` | INTEGER | não | métrica ausente = **linha ausente**, nunca 0 |
 | `period_start`, `period_end` | TEXT | não | |
 | `granularity` | TEXT | não | `CHECK IN ('day','total_over_range','lifetime')` |
-| `source` | TEXT | não | `CHECK IN ('meta_graph','meta_webhook')` |
+| `source` | TEXT | não | `CHECK` no enum do contrato (`official_api` no caso Meta) |
 | `captured_at`, `updated_at` | TEXT | não | |
 
 UNIQUE (`meta_asset_id`, `metric`, `period_start`, `period_end`, `granularity`) com upsert: a Meta reescreve números de período recente, e duas linhas para a mesma janela seria dupla contagem no gráfico.
@@ -322,7 +347,7 @@ Publicação é fato histórico com contadores que mudam; precisa de série pró
 | `published_at` | TEXT | sim | |
 | `captured_on` | TEXT | não | dia UTC da captura (`YYYY-MM-DD`), para no máximo 1 linha por dia |
 | `reach`, `impressions`, `likes`, `comments`, `shares`, `saves`, `plays`, `views` | INTEGER | sim | `NULL` = não exposto pela plataforma |
-| `source` | TEXT | não | `CHECK IN ('meta_graph','meta_webhook')` |
+| `source` | TEXT | não | `CHECK` no enum do contrato (`official_api` no caso Meta) |
 
 ### `ad_insight_snapshots` (issue #12)
 Uma linha por entidade de anúncio por período.
@@ -348,7 +373,7 @@ Uma linha por entidade de anúncio por período.
 | `cpc_minor`, `cpm_minor`, `cost_per_result_minor` | INTEGER | sim | |
 | `result_action_type` | TEXT | sim | ex.: `onsite_conversion.messaging_conversation_started_7d` |
 | `captured_at`, `updated_at` | TEXT | não | |
-| `source` | TEXT | não | default `meta_graph` |
+| `source` | TEXT | não | default `official_api`; `provider` default `meta_graph` |
 
 UNIQUE (`ad_account_id`, `level`, `entity_external_id`, `date_start`, `date_stop`, `breakdown_key`) com upsert.
 

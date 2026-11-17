@@ -1,4 +1,8 @@
 -- 005 — snapshots ganham origem oficial; métricas de período e de anúncio (#8, #12).
+--
+-- `source` NÃO ganha valor novo: continua o enum de src/models/schemas.py
+-- (html, embedded_json, official_api, oembed, ytdlp). A origem oficial é
+-- `source='official_api'` + `provider='meta_graph'`, como decidido no contrato.
 
 -- Só ADD COLUMN nullable, sem default: SQLite aplica sem reescrever a tabela.
 ALTER TABLE profile_snapshots ADD COLUMN meta_asset_id TEXT REFERENCES meta_assets(id) ON DELETE SET NULL;
@@ -7,6 +11,7 @@ ALTER TABLE profile_snapshots ADD COLUMN period_end     TEXT;
 ALTER TABLE profile_snapshots ADD COLUMN inserted_by    TEXT
     CHECK (inserted_by IS NULL OR inserted_by IN ('request', 'webhook', 'job', 'migration'));
 ALTER TABLE profile_snapshots ADD COLUMN dedupe_key     TEXT;
+ALTER TABLE profile_snapshots ADD COLUMN provider       TEXT;
 
 -- Série por conta conectada: "histórico da conta X, últimos 30 dias".
 CREATE INDEX IF NOT EXISTS ix_snapshot_asset
@@ -28,7 +33,8 @@ CREATE TABLE IF NOT EXISTS profile_insight_snapshots (
     period_start   TEXT NOT NULL,
     period_end     TEXT NOT NULL,
     granularity    TEXT NOT NULL CHECK (granularity IN ('day', 'total_over_range', 'lifetime')),
-    source         TEXT NOT NULL CHECK (source IN ('meta_graph', 'meta_webhook')),
+    source         TEXT NOT NULL CHECK (source IN ('official_api', 'html', 'embedded_json', 'oembed', 'ytdlp')),
+    provider       TEXT,
     captured_at    TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
     CHECK (period_start <= period_end)
@@ -55,7 +61,9 @@ CREATE TABLE IF NOT EXISTS meta_post_snapshots (
     saves              INTEGER,
     plays              INTEGER,
     views              INTEGER,
-    source             TEXT NOT NULL CHECK (source IN ('meta_graph', 'meta_webhook'))
+    source             TEXT NOT NULL CHECK (source IN ('official_api', 'html', 'embedded_json', 'oembed', 'ytdlp')),
+    provider           TEXT,
+    inserted_by        TEXT NOT NULL DEFAULT 'job' CHECK (inserted_by IN ('request', 'webhook', 'job', 'migration'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_post_snapshot_day
     ON meta_post_snapshots (meta_asset_id, external_post_id, captured_on);
@@ -87,7 +95,9 @@ CREATE TABLE IF NOT EXISTS ad_insight_snapshots (
     cpm_minor               INTEGER,
     cost_per_result_minor   INTEGER,
     result_action_type      TEXT,
-    source                  TEXT NOT NULL DEFAULT 'meta_graph' CHECK (source IN ('meta_graph', 'meta_webhook')),
+    source                  TEXT NOT NULL DEFAULT 'official_api' CHECK (source IN ('official_api', 'html', 'embedded_json', 'oembed', 'ytdlp')),
+    provider                TEXT NOT NULL DEFAULT 'meta_graph',
+    inserted_by             TEXT NOT NULL DEFAULT 'job' CHECK (inserted_by IN ('request', 'webhook', 'job', 'migration')),
     captured_at             TEXT NOT NULL,
     updated_at              TEXT NOT NULL,
     CHECK (date_start <= date_stop),

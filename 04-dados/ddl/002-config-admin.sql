@@ -1,4 +1,21 @@
--- 002 — configuração persistida, painel e auditoria (#6, #4, #3).
+-- 002 — configuração persistida, segredos cifrados, painel e auditoria (#6, #4, #3).
+--
+-- ORDEM IMPORTA: admin_users vem primeiro. config_state e config_overrides têm FK
+-- para admin_users; com PRAGMA foreign_keys=ON, criar a tabela filha antes da pai
+-- deixa a FK apontando para tabela inexistente (o INSERT seguinte falha).
+
+CREATE TABLE IF NOT EXISTS admin_users (
+    id                    TEXT    PRIMARY KEY,
+    username              TEXT    NOT NULL COLLATE NOCASE,
+    password_hash         TEXT    NOT NULL,
+    password_algo         TEXT    NOT NULL CHECK (password_algo IN ('argon2id')),
+    must_change_password  INTEGER NOT NULL DEFAULT 1 CHECK (must_change_password IN (0, 1)),
+    is_active             INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    password_changed_at   TEXT,
+    created_at            TEXT    NOT NULL,
+    updated_at            TEXT    NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_users_username ON admin_users (username);
 
 CREATE TABLE IF NOT EXISTS config_state (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
@@ -10,19 +27,7 @@ CREATE TABLE IF NOT EXISTS config_state (
 INSERT INTO config_state (id, version, updated_at) VALUES (1, 1, strftime('%Y-%m-%d %H:%M:%f', 'now'))
 ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS admin_users (
-    id                    TEXT    PRIMARY KEY,
-    username              TEXT    NOT NULL COLLATE NOCASE,
-    password_hash         TEXT    NOT NULL,
-    password_algo         TEXT    NOT NULL CHECK (password_algo IN ('argon2id', 'bcrypt')),
-    must_change_password  INTEGER NOT NULL DEFAULT 1 CHECK (must_change_password IN (0, 1)),
-    is_active             INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
-    password_changed_at   TEXT,
-    created_at            TEXT    NOT NULL,
-    updated_at            TEXT    NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_admin_users_username ON admin_users (username);
-
+-- Campos NÃO sensíveis. Segredo tem tabela própria (config_secrets).
 CREATE TABLE IF NOT EXISTS config_overrides (
     key         TEXT PRIMARY KEY,
     value_json  TEXT NOT NULL,
@@ -31,6 +36,23 @@ CREATE TABLE IF NOT EXISTS config_overrides (
     updated_ip  TEXT,
     CHECK (key = upper(key)),
     CHECK (length(key) BETWEEN 1 AND 64)
+);
+
+-- Campos sensíveis: só o texto cifrado. AAD (dados associados) amarra a linha à
+-- finalidade e à chave, impedindo que um ciphertext de token Meta seja aceito
+-- como segredo de configuração.
+CREATE TABLE IF NOT EXISTS config_secrets (
+    key             TEXT PRIMARY KEY,
+    ciphertext      BLOB NOT NULL,
+    nonce           BLOB NOT NULL,
+    key_version     INTEGER NOT NULL,
+    aad             TEXT NOT NULL DEFAULT 'config_secret' CHECK (aad = 'config_secret'),
+    updated_at      TEXT NOT NULL,
+    updated_by      TEXT NOT NULL REFERENCES admin_users(id) ON DELETE RESTRICT,
+    updated_ip      TEXT,
+    CHECK (key = upper(key)),
+    CHECK (length(key) BETWEEN 1 AND 64),
+    CHECK (length(nonce) = 12)
 );
 
 CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -71,7 +93,9 @@ CREATE TABLE IF NOT EXISTS config_audit_log (
     source          TEXT    NOT NULL CHECK (source IN ('panel', 'cli', 'api')),
     applied_mode    TEXT    NOT NULL CHECK (applied_mode IN ('hot', 'restart_required', 'rejected')),
     ip              TEXT,
-    request_id      TEXT    NOT NULL
+    request_id      TEXT    NOT NULL,
+    -- segredo nunca tem valor em claro na auditoria, nem por bug de escrita
+    CHECK (is_secret = 0 OR (old_value IS NULL OR old_value = '***') AND (new_value IS NULL OR new_value = '***'))
 );
 -- Tela de auditoria: últimas N alterações.
 CREATE INDEX IF NOT EXISTS ix_audit_recent ON config_audit_log (changed_at DESC);

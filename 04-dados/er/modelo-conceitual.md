@@ -11,6 +11,7 @@ erDiagram
     ADMIN_USER      ||--o{ AUTH_ATTEMPT         : "tenta entrar 0..N vezes"
 
     CONFIG_OVERRIDE ||--o{ CONFIG_CHANGE_AUDIT  : "sofre 0..N alterações"
+    ADMIN_USER      ||--o{ CONFIG_SECRET        : "grava 0..N segredos"
 
     API_KEY         ||--|{ API_KEY_SCOPE        : "tem 1..N escopos"
 
@@ -43,6 +44,11 @@ erDiagram
     CONFIG_OVERRIDE {
         texto chave_do_campo
         texto valor_serializado
+    }
+    CONFIG_SECRET {
+        texto chave_do_campo
+        binario texto_cifrado
+        inteiro versao_da_chave
     }
     CONFIG_CHANGE_AUDIT {
         instante alterado_em
@@ -118,4 +124,5 @@ erDiagram
 - **`API_KEY ||--|{ API_KEY_SCOPE`**: chave sem escopo é chave que não serve para nada; mínimo 1.
 - **`META_ASSET |o--o{ PROFILE_SNAPSHOT`**: scraping não tem conta Meta. O snapshot existe sem `meta_asset_id`; por isso `0..N` e não `1..N`.
 - **`META_WEBHOOK_EVENT`** aponta para o objeto atingido quando ele for conhecido (`0..1` do lado do evento). Objeto desconhecido é aceito, gravado e descartado — o evento não depende de a conta existir.
+- **`CONFIG_SECRET`** é entidade separada de `CONFIG_OVERRIDE`, não um atributo dela: o valor é ilegível por definição, tem ciclo de vida próprio (versão de chave) e nunca é devolvido em leitura. O vínculo com `CONFIG_CHANGE_AUDIT` é pela chave, como no override.
 - **`CONFIG_OVERRIDE ||--o{ CONFIG_CHANGE_AUDIT`**: auditoria sobrevive ao override removido. O vínculo é lógico (pela chave), não FK — por isso a auditoria repete a chave e o nome do autor.

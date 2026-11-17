@@ -37,6 +37,7 @@ Premissa de volume (a confirmar com o Leonardo — é a única forma de dimensio
 | `ix_api_keys_active` (parcial) | listagem do painel sem revogadas | índice menor |
 | `ix_audit_recent` | tela de auditoria: `ORDER BY changed_at DESC LIMIT 50` | sem ordenar a tabela inteira |
 | `ix_audit_key` | histórico de um campo | por campo |
+| — (PK de `config_secrets`) | leitura do segredo efetivo por chave, uma vez por boot e a cada teste de conexão | PK é a própria chave |
 | `ix_admin_sessions_user` | logout de todas as sessões; validação da sessão | por usuário |
 | `ix_auth_attempts_ip` / `_user` | contagem de falhas na janela: `WHERE ip=? AND attempted_at>=?` | brute force em O(log n) |
 
@@ -61,6 +62,7 @@ Premissa de volume (a confirmar com o Leonardo — é a única forma de dimensio
 | `admin_auth_attempts` | pico 200 | 6 000 | — (retenção 30 d) | 120 | ~2 MB |
 | `api_keys` | ~1 | ~20 total | ~20 | 200 | desprezível |
 | `config_overrides` | — | ~50 total | ~50 | 250 | desprezível |
+| `config_secrets` | — | ~8 total | ~8 | 250 + ciphertext | desprezível |
 
 **Conclusão de volume:** o banco cresce menos de 100 MB/ano no cenário incremental. SQLite não é o gargalo de espaço; o gargalo é **escrita concorrente**.
 

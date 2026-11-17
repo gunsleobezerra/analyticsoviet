@@ -4,21 +4,20 @@ Banco: SQLite, arquivo `./data/analyticsoviet.db` no volume `api-data` (`docker-
 Hoje: `Base.metadata.create_all` no `lifespan` (`src/db/session.py`), sem controle de versão.
 Isso funciona para tabela nova e **falha para coluna nova**: `create_all` não altera tabela existente. A migração 005 é justamente uma alteração de tabela, então o controle de versão deixa de ser opcional.
 
-## Requisito de mecanismo (decisão do Tech Lead)
+## Mecanismo (fechado pelo Tech Lead)
 
-Duas opções, ambas aceitáveis do ponto de vista de dados:
+Runner próprio em SQL, sem Alembic. Os arquivos vão para `src/db/migrations/NNN-*.sql` (dentro do pacote, para viajar na imagem Docker, que copia só `src/`). **Os arquivos deste diretório são a cópia de referência**: o conteúdo precisa ser idêntico ao de `src/db/migrations/`, e o `checksum` gravado em `schema_migrations` é o que detecta divergência. Manter duas cópias é dívida; a saída é esta pasta virar só documentação e o SQL canônico ficar em `src/db/migrations/` — decisão do Tech Lead.
 
-| Opção | O que exige | Custo |
-|---|---|---|
-| **A. Alembic** | `alembic` em `pyproject.toml`, `alembic.ini`, `versions/`; `create_all` sai do `lifespan` | dependência nova, configuração assíncrona chata com aiosqlite |
-| **B. Runner próprio** | `src/db/migrate.py` lendo `04-dados/ddl/*.sql` em ordem, com `schema_migrations` | ~80 linhas, sem dependência, casa com o estilo do projeto (docs embutidos, sem CDN) |
+Requisitos não negociáveis:
 
-Recomendação: **B** neste estágio — um arquivo SQL por vez, sem `downgrade` automático, com `checksum` para detectar arquivo alterado depois de aplicado. Requisitos não negociáveis de qualquer opção:
-
-1. Roda **uma vez por banco**, antes de o uvicorn subir, no entrypoint do container (`python -m db.migrate && uvicorn ...`). Com `WEB_CONCURRENCY > 1`, migrar dentro do `lifespan` faz N workers disputarem o mesmo `ALTER TABLE`.
+1. Roda **uma vez por banco**, no entrypoint do container, antes do uvicorn (`python -m db.migrate && uvicorn ...`), com `flock` para que dois containers não migrem juntos. Com `WEB_CONCURRENCY > 1`, migrar dentro do `lifespan` faz N workers disputarem o mesmo `ALTER TABLE`.
 2. Cada arquivo em **uma transação** (`BEGIN IMMEDIATE`); falhou, desfaz o arquivo inteiro e o boot aborta com log claro.
 3. `schema_migrations` é a trava: `INSERT INTO schema_migrations` da versão logo antes do `COMMIT` (PK única impede dupla aplicação).
 4. Banco sem `schema_migrations` e com `profile_snapshots` já existente = baseline aplicado; registra versão 1 sem tocar em dados.
+5. Guarda de downgrade: se o banco tem versão maior que o código em execução, aborta o boot em vez de rodar com schema desconhecido.
+6. Teste de paridade: banco novo por `create_all` e banco migrado precisam ter o mesmo `PRAGMA table_info` e os mesmos índices, para cada tabela.
+7. Banco **novo** não executa 001–005: o runner detecta que não há tabelas, aplica `create_all` a partir dos modelos e carimba todas as versões como aplicadas. Rodar 005 num banco criado por `create_all` falha com `duplicate column name`, porque as colunas já existem. Essa é a diferença prática entre "banco novo" e "banco existente" e precisa estar no código, não na memória de quem opera.
+8. Reaplicação: 001–004 são protegidos por `IF NOT EXISTS`; 005 é `ALTER TABLE` e **não** é idempotente. A única trava é `schema_migrations`. Teste de idempotência roda o runner duas vezes e exige a segunda execução sem efeito.
 
 ## Etapas
 
@@ -26,12 +25,16 @@ Recomendação: **B** neste estágio — um arquivo SQL por vez, sem `downgrade`
 |---|---|---|---|
 | 0 | Cópia do arquivo `.db` (operador, não eu) para fora do volume; anotar o commit em execução | não | restaure a cópia |
 | 1 | `001-baseline.sql`: cria `schema_migrations`, registra versão 1 | não | nada a desfazer (tabela vazia de dados) |
-| 2 | `002-config-admin.sql`: `config_state`, `admin_users`, `config_overrides`, `admin_sessions`, `admin_auth_attempts`, `config_audit_log` | não | `DROP TABLE` nas 4 novas; nenhuma tabela antiga é tocada |
+| 2 | `002-config-admin.sql`: `admin_users` **primeiro**, depois `config_state`, `config_overrides`, `config_secrets`, `admin_sessions`, `admin_auth_attempts`, `config_audit_log` | não | `DROP TABLE` na ordem inversa das FKs |
 | 3 | `003-api-keys.sql`: `api_keys`, `api_key_scopes` | não | `DROP TABLE api_key_scopes; DROP TABLE api_keys;` |
 | 4 | `004-meta.sql`: conexão, escopos, ativos, tokens, eventos, webhooks, uso | não | `DROP TABLE` na ordem inversa das FKs (eventos → uso → tokens → assets → scopes → connections) |
-| 5 | `005-snapshots.sql`: 5 `ADD COLUMN` nullable + 2 índices em `profile_snapshots` | **sim, por segundos** | ver abaixo |
+| 5 | `005-snapshots.sql`: 6 `ADD COLUMN` nullable + 2 índices em `profile_snapshots` | **sim, por segundos** | ver abaixo |
 | 6 | Carga inicial do administrador (usuário único, senha do ambiente) — fora do DDL, é seed da aplicação | não | apaga a linha |
 | 7 | `PRAGMA foreign_keys=ON` por conexão (código, `src/db/session.py`) | não | remover o listener |
+
+### Ordem dentro do 002 (correção de bloqueio da revisão)
+
+A primeira versão criava `config_state` antes de `admin_users`, com FK para ela. Com `PRAGMA foreign_keys=ON`, criar a tabela filha antes da pai deixa a FK apontando para tabela inexistente e o `INSERT` seguinte em `config_state` falha com "no such table: main.admin_users". Ordem correta no arquivo: `admin_users` → `config_state` → `config_overrides` → `config_secrets` → `admin_sessions` → `admin_auth_attempts` → `config_audit_log`. Verificado em banco descartável com `foreign_keys=ON` e `PRAGMA foreign_key_check` vazio ao final.
 
 ### Por que a etapa 5 pede janela curta
 
@@ -44,6 +47,7 @@ As colunas novas são nullable e o código antigo as ignora. Reverter o deploy *
 ```sql
 DROP INDEX IF EXISTS ux_snapshot_dedupe;
 DROP INDEX IF EXISTS ix_snapshot_asset;
+ALTER TABLE profile_snapshots DROP COLUMN provider;
 ALTER TABLE profile_snapshots DROP COLUMN dedupe_key;   -- SQLite >= 3.35
 ALTER TABLE profile_snapshots DROP COLUMN inserted_by;
 ALTER TABLE profile_snapshots DROP COLUMN period_end;

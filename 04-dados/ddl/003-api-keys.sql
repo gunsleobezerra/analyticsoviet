@@ -1,4 +1,9 @@
 -- 003 — chaves de API da api pública (#13).
+--
+-- Decisões aplicadas: chave nomeada (não global), valor `avk_` + 32 bytes
+-- aleatórios (256 bits), guardada só como SHA-256 hex + prefixo exibível.
+-- Revogação vale na requisição seguinte porque a autenticação lê esta tabela
+-- por requisição — não há cache de chave com TTL longo.
 
 CREATE TABLE IF NOT EXISTS api_keys (
     id              TEXT PRIMARY KEY,
@@ -10,7 +15,10 @@ CREATE TABLE IF NOT EXISTS api_keys (
     expires_at      TEXT,
     revoked_at      TEXT,
     revoked_reason  TEXT,
-    last_used_at    TEXT
+    last_used_at    TEXT,
+    CHECK (length(name) BETWEEN 1 AND 80),
+    CHECK (prefix LIKE 'avk\_%' ESCAPE '\'),
+    CHECK (key_hash GLOB '[0-9a-f]*' AND length(key_hash) = 64)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_api_keys_prefix ON api_keys (prefix);
 -- Busca da autenticação: sha256 do valor apresentado, igualdade exata.
@@ -24,3 +32,7 @@ CREATE TABLE IF NOT EXISTS api_key_scopes (
 
 -- Índice parcial que evita varrer chaves revogadas na listagem do painel.
 CREATE INDEX IF NOT EXISTS ix_api_keys_active ON api_keys (created_at DESC) WHERE revoked_at IS NULL;
+
+-- Sem contador de rate limit aqui: 120/min de leitura e 30/min de scraping
+-- ficam no limitador em memória/Redis (uma escrita por requisição no SQLite
+-- serializa o serviço inteiro).

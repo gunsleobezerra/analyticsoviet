@@ -3,12 +3,15 @@
 --
 -- Regras deste diretório:
 --  * ordem numérica = ordem de aplicação;
---  * cada arquivo é idempotente o suficiente para ser registrado em schema_migrations
---    (a aplicação abre transação, aplica o arquivo, grava a versão);
---  * o DDL precisa casar com os modelos SQLAlchemy de src/db/models.py —
---    divergência entre os dois gera comportamento diferente entre banco novo
---    (create_all) e banco migrado. Teste: banco novo via create_all vs banco
---    migrado devem ter o mesmo `PRAGMA table_info` e os mesmos índices.
+--  * o SQL canônico vai para src/db/migrations/ (o Dockerfile copia só src/);
+--    esta pasta é a referência legível, e o checksum em schema_migrations
+--    detecta divergência entre as duas cópias;
+--  * 001 a 004 usam IF NOT EXISTS; 005 usa ALTER TABLE ADD COLUMN e **não é
+--    idempotente** — reaplicar 005 falha com "duplicate column name". A trava
+--    contra reaplicação é a tabela schema_migrations, não o IF NOT EXISTS;
+--  * banco NOVO não roda 001–005: o runner detecta ausência de tabelas, aplica
+--    create_all a partir dos modelos e carimba todas as versões como aplicadas.
+--    Rodar 005 num banco criado por create_all falha, porque as colunas já existem;
 --  * horários: TEXT no formato que o SQLAlchemy grava em SQLite
 --    ('YYYY-MM-DD HH:MM:SS.ffffff'), sempre UTC por convenção.
 --    Confirmar o formato real antes: SELECT captured_at FROM profile_snapshots LIMIT 5;
