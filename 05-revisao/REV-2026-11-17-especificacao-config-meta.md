@@ -155,3 +155,71 @@ A ordem do plano está correta exceto pela ausência da #13 e pela posição de 
 - Decisões do Tech Lead: não publicadas (frontend, hash, criptografia, versionamento de schema). O modelo recomenda runner próprio em vez de Alembic — decisão ainda pendente.
 - Se o Coolify termina TLS e se existe app Meta: depende do Leonardo.
 - O DDL foi lido, não executado. A falha do B17 é de ordem de DDL e de semântica do `PRAGMA foreign_keys`, não de sintaxe.
+
+---
+
+# Rodada 2 — 2026-11-17, após Tech Lead e MetaNO
+
+Novas fontes: `Shared/analyticsoviet-techlead/decisoes-tecnicas.md` (Tech Lead) e `Shared/analyticsoviet-meta/00-fatos-meta.md` (MetaNO), mais os comentários publicados nas issues #1, #4, #5, #6, #7, #8, #9, #10, #11, #12 e #13.
+
+## Bloqueios desta rodada que foram fechados
+
+| # | Item | Fechado por |
+|---|---|---|
+| B3 | Rotas isentas de chave | Tech Lead: `/v1/health`, callback OAuth, webhook |
+| B4 | `/v1/health` público, `/v1/system/status` autenticado | Tech Lead + MetaNO |
+| B5 | `/mcp` aberto | Decisão: `MCP_ENABLED=false` por padrão e chave quando ligado — **implementação ainda não fecha, ver R2-6** |
+| B6 | Três desenhos de senha | Tech Lead: `admin_users` + Argon2id; hash no banco, ambiente só como seed |
+| B9 | Janela de Insights | 28 dias, sobrescrevível |
+| B11 | `source` da Graph | `official_api` + `extra.provider="meta_graph"`, sem valor novo no enum |
+| B12 | Chave de criptografia editável | `APP_ENCRYPTION_KEY` somente ambiente |
+| B19 | Segredo no banco | Fechado a favor do arquiteto: cifrado, em `config_secrets`, com `key_version` |
+
+Consequência imediata para dois artefatos: o **modelo** precisa criar `config_secrets` e aceitar segredo cifrado (hoje recusa com 422), e o **ADR-0004** do arquiteto precisa ser reescrito (diz que hash de senha vive só no ambiente). Sem esses dois ajustes, os bloqueios fechados por decisão continuam abertos no documento.
+
+## Bloqueios que continuam abertos
+
+- **B1** Requisitos e arquitetura fora do git; repo de artefatos inexistente.
+- **B2** #13 fora do plano; o plano v1 ainda diz "autenticação de `/v1` fora de escopo".
+- **B7** Auditoria: uma linha por escrita (#4) × por campo (RF e modelo). Acordo existe no modelo, corpo da issue não mudou.
+- **B8** Invalidação de cache: o plano ainda manda "limpar chaves da plataforma", o que o `Cache` não permite.
+- **B10** Campos de webhook: MetaNO não confirmou a lista literal dos campos da Página (declarou como não verificado), então a decisão "só `feed`" segue como premissa, não fato.
+- **B15** 21 RFs sem critério Gherkin escrito.
+- **B16** Diagramas C4 não renderizam em Mermaid.
+- **B17** Migração 002 falha: `config_state` referencia `admin_users` e insere linha antes de a tabela existir.
+- **B18** Formato de data não fixado (`strftime` × `isoformat` × `DateTime`).
+
+## Novos bloqueios — revisão da #13 (pedido do dono)
+
+**R2-1. Não existe tabela rota → escopo, e sem ela os escopos não separam nada.**
+`/v1/profile/{platform}/{handle}`, `/v1/post`, `/v1/metrics/{platform}/{handle}` e `POST /v1/scrape` vão todos ao upstream. Se `read:metrics` cobrir `/v1/metrics`, uma chave de leitura dispara scraping, contra o objetivo declarado da #13. O único leitor puro é `GET /v1/history`. Sem a classificação por rota, o critério "chave sem escopo → 403" não é escrevível.
+
+**R2-2. Escopo `admin` não autoriza nenhuma rota.** `/admin/api/*` é sessão de painel e a própria #13 proíbe chave lá. O valor existe só no `CHECK` de `api_key_scopes`. Escopo morto que aparenta poder.
+
+**R2-3. "Comparação em tempo constante" é critério sem objeto.** A autenticação busca por `key_hash` em índice único; não há comparação em aplicação para ser constante. Manter o texto convida a implementar algo inútil e a omitir o que importa: hash fora de log e de auditoria.
+
+**R2-4. `API_AUTH_ENABLED` tem três classificações simultâneas** — frio (#6), quente com auditoria (Arquiteto), `env_only` (Analista). A #7 gera o formulário do schema, então isso vira três telas. Com precedência banco > ambiente, `false` gravado no banco abre a API pública no próximo restart.
+
+**R2-5. A API pública passa a depender do SQLite para autenticar.** Ler a chave por requisição é o único jeito de "revogada invalida na requisição seguinte" ser verdade, mas transforma indisponibilidade do banco em 503 para todo `/v1`. É decisão de disponibilidade, precisa estar escrita (fail closed, `/v1/health` público, teste com banco fechado).
+
+**R2-6. `/mcp` não aceita `Depends`.** `src/main.py` usa `app.mount("/mcp", mcp.sse_app(...))`; dependência FastAPI não se aplica a `mount`. "Exige a mesma chave quando ligado" só vale com middleware ASGI na frente do mount — hoje o critério não tem onde ser implementado.
+
+## Novos achados — corrige depois
+
+1. Unidade do limite por chave: 30/min por requisição ou por URL? Lote de `scrape_max_urls=20` multiplica por 20 e estoura `ratelimit_instagram_per_minute=20`. MetaNO confirma que N IDs = N chamadas.
+2. Onde o contador vive: modelo diz Redis/cache, Tech Lead não decidiu. Com `CACHE_BACKEND=memory` e 3 workers, o limite efetivo é 3×.
+3. Tabela de erro da autenticação ausente: 401 com `WWW-Authenticate`, 403 para escopo, 429 com `Retry-After`, e `Authorization` × `X-API-Key` divergentes.
+4. `Cache-Control: no-store` na resposta que devolve a chave em claro.
+5. Rotação × revogação: "antiga válida por 24 h" e "revogada invalida na requisição seguinte" exigem rotação = linha nova + `expires_at`, não `revoked_at`.
+6. Prefixo: modelo aceita 12–16 caracteres; Tech Lead define 12 primeiros. Fixar um.
+7. `/v1/system/status` é rota nova: não existe em `src/api/routes/system.py` (só `/health` e `/platforms`). Precisa de contrato e de modelo de resposta; `HealthResponse` hoje é fechado e não tem bloco `meta`.
+
+## Veredito da rodada 2
+
+**Continua reprovado para implementação**, por menos motivos: os bloqueios de decisão técnica e de fato da Meta foram fechados. O que trava agora é de documentação e de contrato — modelo e ADR desatualizados em relação às decisões, plano v1 sem a #13, migração 002 que não roda, e a #13 sem tabela rota→escopo. Nenhum exige nova decisão de terceiro; todos exigem consolidação.
+
+## Ainda não verifiquei
+
+- Lista literal de campos de webhook da Página e condições de invalidação do token de Página: o próprio MetaNO marcou como não confirmado.
+- DDL não executado; a falha da 002 é de ordem de DDL, não de sintaxe.
+- Se o Coolify termina TLS e se o app Meta existe: depende do Leonardo.
