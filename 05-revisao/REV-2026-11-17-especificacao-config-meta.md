@@ -6,14 +6,15 @@
   - `docs/planejamento/00-plano.md` (branch `docs/plano-entrega`) — Líder de Planejamento
   - `Shared/analyticsoviet-requisitos/01-requisitos/RF-painel-config.md`, `RF-integracao-meta.md`, `decisoes-e-ordem.md` — Analista de Requisitos (**não versionados**)
   - `Shared/analyticsoviet-arquitetura/arquitetura-admin-config.md`, `arquitetura-meta.md`, `adr-config-e-meta.md` — Arquiteto de Software (**não versionados**)
+  - `04-dados/` na branch `dados/modelo-config-meta@12c6d86` — Modelador de Dados
   - Issues #1–#13 em `gunsleobezerra/analyticsoviet`
-- **Não revisado, por ausência na data:** modelo de dados (Modelador) e fatos da Meta (MetaNO). Sem eles, #6/#10/#9/#13 e toda afirmação sobre a Meta seguem em aberto.
+- **Não revisado, por ausência na data:** fatos da Meta (MetaNO) e decisões técnicas (Tech Lead). Sem eles, #10/#11/#9 e toda afirmação sobre a Meta seguem em aberto.
 
 ## Veredito
 
-**Reprovado para implementação.** O desenho das duas frentes está consistente com o código e resolve os dois furos reais (`enable_history` e `--workers`), mas: os documentos de requisitos e arquitetura não estão em git; os critérios de aceite apontam para 21 critérios Gherkin que não existem; e três conflitos entre plano, requisitos e arquitetura mudam tabela, permissão e contrato. Nenhum deles é resolvível pelo implementador.
+**Reprovado para implementação.** O desenho das duas frentes está consistente com o código e resolve os dois furos reais (`enable_history` e `--workers`), mas: os documentos de requisitos e arquitetura não estão em git; os critérios de aceite apontam para 21 critérios Gherkin que não existem; três conflitos entre plano, requisitos e arquitetura mudam tabela, permissão e contrato; e a migração 002 falha como está escrita. Nenhum deles é resolvível pelo implementador.
 
-Pronto: leitura do código, pontos de integração arquivo por arquivo, classificação quente/fria, fallback Graph→scraping, fluxo OAuth com `state` de uso único, fila com lock de líder.
+Pronto: leitura do código, pontos de integração arquivo por arquivo, classificação quente/fria, fallback Graph→scraping, fluxo OAuth com `state` de uso único, fila com lock de líder, modelo lógico com PK/FK/UNIQUE em todas as tabelas, dinheiro em inteiro com expoente da moeda e rollback da migração.
 
 ## Bloqueia
 
@@ -37,12 +38,13 @@ A #13 manda aplicar a dependência de chave no router `/v1` inteiro. `GET /v1/me
 `src/main.py` monta `mcp.sse_app` em `/mcp` com `allowed_origins=["*"]`; `src/mcp_server.py` monta o próprio `AppState` via `get_settings()` e chama `_dispatch_url` direto, sem passar por `/v1`. A chave em `/v1` não cobre esse caminho: o scraping continua aberto por outra porta, e a configuração quente nunca chega ao MCP (ele lê `get_settings()` no primeiro uso e congela).
 **Pergunta:** `/mcp` entra no escopo da #13 e do #5, ou fica como risco aceito por escrito? Hoje não está em nenhum dos dois.
 
-### B6. Troca obrigatória de senha sem lugar para guardar o hash
-UC-CFG-01 (4c) e o plano exigem troca da senha inicial no primeiro acesso. ADR-0004 e a arquitetura gravam `ADMIN_PASSWORD_HASH` só no ambiente e dizem que trocar a senha é trocar a variável — não há onde persistir o hash novo.
-**Pergunta:** tabela de credencial no banco (com hash) ou a troca obrigatória sai do escopo?
+### B6. Troca obrigatória de senha: três documentos, três desenhos
+UC-CFG-01 (4c) e o plano exigem troca da senha inicial no primeiro acesso; ADR-0004 grava `ADMIN_PASSWORD_HASH` só no ambiente e diz que trocar a senha é trocar a variável; o modelo criou `admin_users` com `password_hash`, `must_change_password` e `password_changed_at`.
+**Pergunta:** vale o modelo (`admin_users` no banco, com seed do ambiente)? Então o ADR-0004 precisa ser reescrito, senão o implementador segue o ADR e a troca de senha não existe.
 
 ### B7. Auditoria: uma linha por escrita ou por campo?
-Issue #4: "Toda escrita gera exatamente uma linha de auditoria". RF-CFG-08: "uma linha por campo alterado". Arquitetura: "uma linha por transação". Um `PATCH` de 3 campos gera 1 ou 3 linhas? O critério de aceite não é escrevível sem isso.
+Issue #4: "Toda escrita gera exatamente uma linha de auditoria". RF-CFG-08: "uma linha por campo alterado". Modelo: uma linha por chave, agrupada por `request_id`. Um `PATCH` de 3 campos gera 1 ou 3 linhas?
+**Pergunta:** confirma uma linha por campo com `request_id` (modelo + RF) e corrige o corpo da #4?
 
 ### B8. Invalidação de cache por TTL: decisão inimplementável
 O plano manda "limpar as chaves da plataforma afetada". `src/core/cache.py` expõe só `get/set/delete/close/stats` — não há listagem nem padrão — e o Redis não tem `SCAN` seguro (a própria arquitetura descartou essa via). Ou vale o epoch por família de TTL da arquitetura, ou se aceita que o TTL novo só vale para chave nova.
@@ -56,7 +58,8 @@ Analista: só `feed` da Página. Arquiteto: `feed`, `comments`, `mentions`; `mes
 **Pergunta:** qual lista vale na primeira entrega?
 
 ### B11. `source` da Graph não existe no enum
-Issue #8 pede `source: "meta_graph"`. `Source` (`src/models/schemas.py:25`) tem `html`, `embedded_json`, `official_api`, `oembed`, `ytdlp`. A arquitetura decidiu `official_api` + `extra.provider`. O corpo da issue precisa de comentário de correção, senão o implementador cria valor novo e quebra quem compara `source`.
+Issue #8 pede `source: "meta_graph"`. `Source` (`src/models/schemas.py:25`) tem `html`, `embedded_json`, `official_api`, `oembed`, `ytdlp`. A arquitetura decidiu `official_api` + `extra.provider`; o modelo diz que `profile_snapshots.source` "passa a receber `meta_graph`/`meta_webhook` — valor novo de enum no contrato". Duas decisões opostas.
+**Pergunta:** `official_api` + `extra.provider` (arquitetura) ou valor novo no enum (modelo)? O corpo da #8 precisa de comentário de correção em qualquer caso, senão o implementador escolhe sozinho.
 
 ### B12. `META_TOKEN_ENCRYPTION_KEY` editável no painel apaga os tokens
 É a chave que decifra os tokens em repouso. Se entrar no schema como campo sensível comum (cifrado com `CONFIG_SECRET_KEY`), trocá-la pela tela torna todos os tokens ilegíveis. Nenhum documento a marca como `read_only`/fora do painel.
@@ -74,6 +77,18 @@ As tabelas de RF apontam para `CA-CFG-01..17` e `CA-META-01..22`, mas só existe
 ### B16. Diagramas C4 não renderizam
 `C4Context`, `C4Container` e `C4Component` não são tipos suportados pelo Mermaid. No GitHub, os seis diagramas aparecem como erro. Trocar por `flowchart` com subgrafo (um por container) ou manter a tabela C4 em texto e usar Mermaid só para sequência/estado.
 
+### B17. A migração 002 falha com `foreign_keys=ON`
+`04-dados/ddl/002-config-admin.sql` cria `config_state` com FK para `admin_users` e **insere a linha `id=1` antes de criar `admin_users`**. Com o `PRAGMA foreign_keys=ON` que o próprio plano de migração exige, o `INSERT` falha com `no such table: main.admin_users` e a etapa 2 aborta.
+**Correção:** criar `admin_users` antes de `config_state`, ou inserir a linha depois. Enquanto isso, a migração não roda.
+
+### B18. Formato de data/hora não está fixado
+As tabelas novas usam `TEXT` "UTC", mas o DDL semeia com `strftime('%Y-%m-%d %H:%M:%f','now')` (espaço, milissegundos) e o código Python escreveria `datetime.isoformat()` (`T`, microssegundos, `+00:00`). A tabela existente `profile_snapshots` grava pelo SQLAlchemy (`DateTime`, `YYYY-MM-DD HH:MM:SS.ffffff`). Misturar formatos quebra `CHECK (expires_at > created_at)`, `ORDER BY changed_at` e consulta por faixa — sem erro, só resultado errado.
+**Pergunta:** qual formato canônico, escrito no modelo? (proposta: `YYYY-MM-DD HH:MM:SS.ffffff` UTC, sem offset, igual ao SQLAlchemy atual)
+
+### B19. Segredo no banco: modelo recusa, #6 decidiu o contrário
+`04-dados/README.md` decisão 1: "nenhum segredo em tabela de configuração; `config_overrides` recusa campo sensível (422)". A decisão fechada de #6 (analista e ADR-0006) é o oposto: segredo cifrado no banco com chave do ambiente. O modelo deixa como "aberto — Tech Lead".
+**Impacto:** sem coluna de segredo, `META_APP_SECRET` e `S3_SECRET_ACCESS_KEY` não podem ser cadastrados pelo painel, e metade do objetivo da frente Config cai. **Pergunta:** qual das duas vale? Se for o modelo, o escopo do painel precisa dizer que segredo continua no `.env`.
+
 ## Corrige depois
 
 1. **"5 TTLs de cache"** nos três documentos. `Settings` tem quatro: `profile`, `posts`, `post`, `blocked` (`src/core/config.py:57-61`).
@@ -89,6 +104,16 @@ As tabelas de RF apontam para `CA-CFG-01..17` e `CA-META-01..22`, mas só existe
 11. **Retenção e exclusão**: snapshots ao desconectar, eventos de webhook, auditoria — sem issue e sem número. Nenhum documento cita base legal/LGPD nem o callback de exclusão de dados que a Meta exige de app com dados de usuário (**a confirmar com MetaNO**).
 12. **RNF-META-06** ("TTL próprio") sem número; **#11 "chamadas na janela"** sem definir a janela; **#13 rate limit por chave** sem requisições/janela e sem entropia mínima da chave.
 13. **Critérios com "ou"**: #5 ("usa o novo proxy **ou** o campo é frio"), #12 ("completos **ou** com indicação de truncamento"). Critério com alternativa não é critério; escolher um ramo.
+14. **FK sem índice** no modelo: `config_audit_log.actor_user_id`, `meta_usage_hourly.asset_id` (140 mil linhas/ano), `meta_tokens.asset_id` e `api_keys.created_by`. Com `foreign_keys=ON`, apagar o pai varre a tabela filha. `meta_usage_hourly` precisa de índice explícito em `asset_id` — o índice por expressão em `COALESCE(asset_id,'')` não atende `WHERE asset_id = ?`, como o próprio documento avisa.
+15. **`config_overrides.key` em MAIÚSCULAS** (`CACHE_TTL_PROFILE_SECONDS`) enquanto o contrato administrativo usa o nome do campo em minúsculas (`database_url`, CA-CFG-03). A regra de conversão precisa estar escrita no contrato, senão o painel manda `database_url` e o banco grava `DATABASE_URL`.
+16. **`graph_version` em dois lugares**: `meta_connections.graph_version` (modelo) e `meta_graph_version` em `Settings` (arquitetura). Dizer qual é a fonte de verdade e o que acontece quando divergem.
+17. **`config_state.updated_by` com `ON DELETE SET NULL`** e `config_overrides.updated_by` com `RESTRICT` na mesma entidade: desativar usuário funciona, apagar não. É coerente com "usuário nunca é apagado", mas o DDL permite os dois caminhos; alinhar.
+
+## Modelo de dados — parecer
+
+Checado item a item: PK em todas as 18 tabelas; FK declarada com `ON DELETE` explícito; cardinalidade nas duas pontas no ER; dinheiro em inteiro com `currency_exponent` (resolve KWD/JPY sem `REAL`); período em `YYYY-MM-DD` no fuso da conta e captura em UTC; migração com rollback documentado por etapa e baseline para banco já existente; volume com premissa explícita.
+
+Falhas: B17 (a 002 não roda com FK ligada), B18 (formato de data não fixado), B19 (segredo recusado contra a decisão de #6) e os índices de FK do item 14. O resto é sólido — é o documento com melhor rastreabilidade da entrega.
 
 ## Sugestões
 
@@ -104,13 +129,14 @@ As tabelas de RF apontam para `CA-CFG-01..17` e `CA-META-01..22`, mas só existe
 | #13 | fora de escopo no plano | incluir na trilha A, entre #3 e #7; bloqueia #10/#9 |
 | #13 | rotas isentas | isentar `oauth/callback`, `webhook`, `health`; `system/status` autenticado |
 | #13 | `/mcp` | incluir na #13 (mesma dependência) ou risco aceito por escrito |
-| #4 | auditoria | uma linha por campo alterado, na mesma transação |
-| #4 | senha | tabela de credencial com hash, ou remover troca obrigatória |
+| #4 | auditoria | uma linha por campo, agrupada por `request_id` (modelo + RF) |
+| #4 | senha | vale `admin_users` do modelo; reescrever ADR-0004 |
 | #5 | invalidação de TTL | epoch por família (arquitetura); descartar "limpar chaves" |
 | #5 | `public_base_url` | frio |
 | #6 | assinaturas | critério reescrito como contrato público inalterado |
+| #6 | segredo no banco | decidir: cifrado no banco (analista/ADR) ou só ambiente (modelo) |
 | #8 | janela | 28 dias, sobrescrevível (analista e arquiteto) |
-| #8 | `source` | `official_api` + `extra.provider = "meta_graph"` |
+| #8 | `source` | `official_api` + `extra.provider = "meta_graph"` (arquitetura) |
 | #9 | campos de webhook | `feed` da Página apenas, na primeira entrega |
 | #10 | chave de criptografia | `read_only`, fora do schema do painel |
 
@@ -126,6 +152,6 @@ A ordem do plano está correta exceto pela ausência da #13 e pela posição de 
 ## O que não verifiquei
 
 - Fatos da Meta (versão da Graph, permissões, tokens, quota, webhook, App Review, Business Discovery): MetaNO não publicou. Toda afirmação sobre a Meta nestes documentos é premissa, não fato.
-- Modelo de dados: não publicado. Sem ele não dá para revisar PK/FK, índices, migração nem o que a #13 e a #10 exigem.
-- Decisões do Tech Lead: não publicadas (frontend, hash, criptografia, versionamento de schema).
+- Decisões do Tech Lead: não publicadas (frontend, hash, criptografia, versionamento de schema). O modelo recomenda runner próprio em vez de Alembic — decisão ainda pendente.
 - Se o Coolify termina TLS e se existe app Meta: depende do Leonardo.
+- O DDL foi lido, não executado. A falha do B17 é de ordem de DDL e de semântica do `PRAGMA foreign_keys`, não de sintaxe.
