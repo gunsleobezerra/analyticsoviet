@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -88,7 +88,7 @@ class EffectiveSettings:
     snapshot, which is what makes a request see one consistent configuration.
     """
 
-    settings: Settings
+    settings: Settings = field(repr=False)
     origins: Mapping[str, ValueOrigin]
     version: int
     loaded_at: datetime
