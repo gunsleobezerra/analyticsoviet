@@ -59,6 +59,9 @@ class Database:
     The schema is created by the migration runner before the process starts, not
     here. The one exception is the ``test`` environment, where the schema comes
     straight from the models so each test database is complete and disposable.
+
+    The engine starts even when metric history is off: the persisted configuration
+    lives in the same database and cannot depend on that switch.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -71,7 +74,7 @@ class Database:
         return self.settings.enable_history
 
     async def start(self) -> None:
-        if not self.enabled or self.engine is not None:
+        if self.engine is not None:
             return
 
         url = self.settings.database_url

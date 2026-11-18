@@ -20,6 +20,7 @@ dependencies = [
     "aiosqlite>=0.20",
     "python-dateutil>=2.9",
     "swagger-ui-bundle>=1.1.0",
+    "cryptography>=43",
 ]
 
 [project.scripts]
