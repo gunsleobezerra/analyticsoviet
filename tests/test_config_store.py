@@ -25,7 +25,9 @@ from core.config_store import (
     ConfigDataError,
     ConfigWriteError,
     PersistentConfigStore,
+    StoredConfig,
     ValueOrigin,
+    sanitize_failure,
 )
 from db import migrate
 from db.config_repository import ConfigRepository
@@ -389,3 +391,99 @@ async def test_another_worker_bumps_its_own_epoch_on_a_ttl_change(database: Data
 
     assert reader.cache_epoch(CacheFamily.POSTS) == 1
     assert reader.cache_epoch(CacheFamily.PROFILE) == 0
+
+
+# --------------------------------------------------------------------------- #
+# degradation: recovery, and what a failure is allowed to say
+# --------------------------------------------------------------------------- #
+
+
+class _FlakySource:
+    """A source that can be told to fail, to exercise the degradation path."""
+
+    def __init__(self, inner: ConfigRepository, error: Exception | None = None) -> None:
+        self._inner = inner
+        self.error = error
+
+    async def load(self) -> StoredConfig:
+        if self.error is not None:
+            raise self.error
+        return await self._inner.load()
+
+    async def set_override(self, key: str, value_json: str, *, entry: object) -> int:
+        return await self._inner.set_override(key, value_json, entry=entry)  # type: ignore[arg-type]
+
+    async def set_secret(self, key: str, sealed: object, *, entry: object) -> int:
+        return await self._inner.set_secret(key, sealed, entry=entry)  # type: ignore[arg-type]
+
+    async def reset(self, key: str, *, entry: object) -> int:
+        return await self._inner.reset(key, entry=entry)  # type: ignore[arg-type]
+
+
+class _RecordingLogger:
+    """Keeps what the store hands to the logger, field by field."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def warning(self, event: str, **fields: object) -> None:
+        self.events.append((event, fields))
+
+    def __getattr__(self, _name: str) -> object:
+        return lambda *args, **kwargs: None
+
+
+async def test_a_recovered_source_clears_the_degraded_reason(database: Database) -> None:
+    """The source comes back without a write, so the version does not move."""
+    source = _FlakySource(ConfigRepository(database))
+    store = PersistentConfigStore(
+        Settings(environment="test"), source, None, reload_interval_seconds=0.0
+    )
+
+    await store.snapshot()
+    assert store.degraded_reason is None
+
+    source.error = RuntimeError("database not started")
+    await store.snapshot()
+    assert store.degraded_reason is not None
+
+    source.error = None
+    recovered = await store.snapshot()
+
+    assert store.degraded_reason is None
+    assert recovered.version == store.version
+
+
+async def test_a_failure_reaches_the_log_without_its_password(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RecordingLogger()
+    monkeypatch.setattr("core.config_store.LOGGER", recorder)
+    password = "s3nh4-que-nao-pode-vazar"
+    source = _FlakySource(
+        ConfigRepository(database),
+        error=RuntimeError(
+            f"connection to postgresql://operator:{password}@db.local:5432/config refused"
+        ),
+    )
+    store = PersistentConfigStore(
+        Settings(environment="test"), source, None, reload_interval_seconds=0.0
+    )
+
+    await store.snapshot()
+
+    assert recorder.events, "the degradation was not logged"
+    logged = " ".join(str(fields.get("reason", "")) for _, fields in recorder.events)
+    assert password not in logged
+    assert "db.local" in logged
+    assert store.degraded_reason is not None
+    assert password not in store.degraded_reason
+
+
+def test_a_sensitive_query_parameter_is_masked() -> None:
+    described = sanitize_failure(
+        RuntimeError("connect failed: dsn?user=ops&password=hunter2&sslmode=require")
+    )
+
+    assert "hunter2" not in described
+    assert "sslmode=require" in described

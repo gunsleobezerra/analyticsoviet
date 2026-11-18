@@ -16,6 +16,7 @@ never see a session, a row or a ciphertext.
 from __future__ import annotations
 
 import json
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
@@ -356,6 +357,9 @@ class PersistentConfigStore(ConfigStore):
 
         self._last_check = now
         if not self._dirty and self._snapshot is not None and stored.version == self._snapshot.version:
+            # The source answered again, so whatever made it degrade is gone:
+            # a status reader must not keep seeing an old failure.
+            self.degraded_reason = None
             return self._snapshot
 
         previous = self._snapshot
@@ -547,10 +551,16 @@ class PersistentConfigStore(ConfigStore):
         }
 
     def _bump_epochs(self, previous: EffectiveSettings | None, current: EffectiveSettings) -> None:
-        """Invalidate exactly the families whose TTL changed.
+        """Invalidate the families whose TTL changed since the previous snapshot.
 
-        Every worker reaches the same conclusion from the same data, so the
-        epoch stays consistent without being stored anywhere.
+        Each worker counts the bumps it has seen, so two workers that observe the
+        same sequence of snapshots agree on the epoch. They can drift when one of
+        them skips a version: a TTL that changes and changes back between two
+        reads leaves that worker one bump ahead. The effect is a different cache
+        namespace per worker until it restarts, which costs duplicate fetches and
+        never serves a wrong value, because the entries of the old epoch are
+        orphaned rather than reused. Versioning the epoch itself, so a skipped
+        bump cannot separate the workers, is a later step.
         """
         if previous is None:
             return
@@ -561,7 +571,7 @@ class PersistentConfigStore(ConfigStore):
     def _degrade(self, exc: Exception) -> EffectiveSettings:
         """Serve what is available and record why, instead of failing the boot."""
         self._last_check = self._clock()
-        self.degraded_reason = f"{type(exc).__name__}: {exc}"
+        self.degraded_reason = sanitize_failure(exc)
         if self._snapshot is not None:
             LOGGER.warning("config_degraded", reason=self.degraded_reason, served="last snapshot")
             return self._snapshot
@@ -581,6 +591,24 @@ class PersistentConfigStore(ConfigStore):
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+#: Credentials embedded in a connection URL, and parameters that carry a secret.
+_URL_CREDENTIALS = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)(?P<credentials>[^/\s@]+)@")
+_SENSITIVE_PARAMETER = re.compile(
+    r"(?i)\b(password|passwd|pwd|secret|token|api_?key|access_key|private_key)=([^&\s,;]+)"
+)
+
+
+def sanitize_failure(exc: BaseException) -> str:
+    """Describe a failure without carrying a credential into a log or a status.
+
+    A database driver quotes the connection string it failed on, and that string
+    may hold a user and a password. What a caller sees keeps the host and the
+    parameter names, and loses the values that must never be written down.
+    """
+    message = f"{type(exc).__name__}: {exc}"
+    message = _URL_CREDENTIALS.sub(lambda match: f"{match.group('scheme')}***@", message)
+    return _SENSITIVE_PARAMETER.sub(lambda match: f"{match.group(1)}=***", message)
 
 
 def _require_writable(name: str, *, secret: bool | None) -> FieldSpec:
@@ -642,4 +670,5 @@ __all__ = [
     "StoredConfig",
     "StoredSecret",
     "ValueOrigin",
+    "sanitize_failure",
 ]
