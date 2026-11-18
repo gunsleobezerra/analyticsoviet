@@ -65,7 +65,7 @@ Hoje os ~50 parâmetros de `src/core/config.py` (`Settings`, pydantic-settings) 
   5. Sistema invalida a configuração em memória e registra `config_changed`.
 - **Alternativos**
   - 2a. Um campo inválido: `422` com chave, motivo e valor recusado; **nenhum** campo é gravado.
-  - 2b. Campo somente leitura enviado: `422` com `read_only`.
+  - 2b. Campo somente leitura ou `env_only` enviado: `422` com `read_only`. Campo frio gravável não cai aqui — é gravado e volta como pendência de reinício.
   - 2c. Segredo enviado como marcador `"***"`: ignorado, valor atual preservado.
   - 2d. Chave de criptografia ausente: escrita de segredo falha fechada (`503`), nada gravado.
 - **Pós-condição:** configuração consistente, auditada, com pendência de reinício sinalizada quando houver.
@@ -124,7 +124,7 @@ Hoje os ~50 parâmetros de `src/core/config.py` (`Settings`, pydantic-settings) 
 |---|---|---|---|
 | RF-CFG-01 | A configuração efetiva é resolvida em três níveis com precedência `db > env > default`. | #6 | CA-CFG-01 |
 | RF-CFG-02 | Cada campo tem classificação declarada: `sensível`, `quente`, `frio` (exige reinício), `somente leitura`. | #6, #5 | CA-CFG-02 |
-| RF-CFG-03 | Campos somente leitura (`database_url`, `api_prefix`, `environment`, `cache_backend`, `redis_url`, backend e caminhos de cookies) recusam override por banco. | #6 | CA-CFG-03 |
+| RF-CFG-03 | Campos somente leitura e `env_only` (`database_url`, `api_prefix`, `environment`, `API_AUTH_ENABLED`, `MCP_ENABLED`) recusam override por banco com `422 read_only`. Campo frio gravável (`cache_backend`, `redis_url`, backend e caminhos de cookies, `proxy_url`, timeouts, `public_base_url`) **aceita** a escrita: o override é gravado e a resposta devolve o campo em `requires_restart=true`, com selo de pendência — frio não é somente leitura. | #6 | CA-CFG-03 |
 | RF-CFG-04 | `get_settings()` devolve a versão efetiva e é invalidado explicitamente após escrita; nenhuma chamada existente muda de assinatura. | #6 | CA-CFG-04 |
 | RF-CFG-05 | A API administrativa expõe `GET/PATCH/DELETE /admin/api/config`, `POST /admin/api/config/validate`, `POST /admin/api/config/test`, `GET /admin/api/config/schema`. | #3 | CA-CFG-05 |
 | RF-CFG-06 | Escrita é atômica: ou todos os campos válidos entram, ou nenhum. | #3 | CA-CFG-06 |
@@ -167,13 +167,20 @@ Cenário: override no banco vence o ambiente
   Então o valor volta a 900 e a origem é "env"
 ```
 
-**CA-CFG-03 — somente leitura**
+**CA-CFG-03 — somente leitura e env_only**
 ```gherkin
 Cenário: campo somente leitura recusa override
   Quando envio PATCH com {"database_url": "sqlite+aiosqlite:///./outro.db"}
   Então a resposta é 422
   E o erro aponta o campo database_url com motivo "read_only"
   E nenhum override é gravado
+
+Cenário: campo frio gravável aceita a escrita como pendência
+  Quando envio PATCH com {"cache_backend": "redis"}
+  Então a resposta é 200
+  E o override de cache_backend é gravado
+  E a resposta lista cache_backend em "requires_restart"
+  E o backend em vigor continua "memory"
 ```
 
 **CA-CFG-06 — atomicidade**
