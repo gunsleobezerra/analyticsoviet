@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Painel de configuração</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+  <script src="/admin/assets/admin.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <h1>Painel de configuração</h1>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <form id="login-form" class="card" hidden>
+      <h2>Entrar</h2>
+      <label for="username">Usuário</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">Senha</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Entrar</button>
+    </form>
+
+    <section id="panel" class="card" hidden>
+      <h2>Sessão</h2>
+      <p>Conectado como <strong id="who"></strong>.</p>
+      <p id="pending" class="warning" hidden>
+        A senha inicial ainda está em uso. Troque-a para liberar a escrita de configuração.
+      </p>
+
+      <form id="password-form">
+        <h3>Trocar senha</h3>
+        <label for="current-password">Senha atual</label>
+        <input id="current-password" name="current_password" type="password" autocomplete="current-password" required>
+        <label for="new-password">Nova senha</label>
+        <input id="new-password" name="new_password" type="password" autocomplete="new-password" required>
+        <button type="submit">Trocar senha</button>
+      </form>
+
+      <button type="button" id="logout" class="secondary">Sair</button>
+    </section>
+  </main>
+</body>
+</html>

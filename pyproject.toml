@@ -21,6 +21,7 @@ dependencies = [
     "python-dateutil>=2.9",
     "swagger-ui-bundle>=1.1.0",
     "cryptography>=43",
+    "argon2-cffi>=23.1",
 ]
 
 [project.scripts]

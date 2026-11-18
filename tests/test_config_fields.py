@@ -68,7 +68,14 @@ def test_secrets_are_typed_as_secrets() -> None:
 
 def test_environment_only_fields() -> None:
     env_only = {spec.name for spec in FIELDS if spec.cls is FieldClass.ENV_ONLY}
-    assert env_only == {"API_AUTH_ENABLED", "MCP_ENABLED", "APP_ENCRYPTION_KEY"}
+    assert env_only == {
+        "API_AUTH_ENABLED",
+        "MCP_ENABLED",
+        "APP_ENCRYPTION_KEY",
+        "ADMIN_USERNAME",
+        "ADMIN_PASSWORD",
+        "ADMIN_PASSWORD_HASH",
+    }
 
     for name in env_only:
         spec = spec_for(name)

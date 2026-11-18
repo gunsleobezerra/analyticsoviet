@@ -14,17 +14,23 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.admin_ui import install_admin_ui
 from api.deps import build_state
 from api.docs import API_DESCRIPTION, EXTERNAL_DOCS, OPENAPI_TAGS, build_servers, install_docs
 from api.routes import metrics, scrape, system
+from api.security import admin_error_handler
+from api.security import protected as admin_protected
+from api.security import router as admin_router
+from core.admin_auth import AdminApiError, AdminAuthService
 from core.banner import inspect_cookies, print_startup_banner
 from core.cache import create_cache
 from core.config import Settings, get_settings
 from core.config_crypto import SecretCipher
-from core.config_store import PersistentConfigStore
+from core.config_store import PersistentConfigStore, sanitize_failure
 from core.errors import ScrapeError
 from core.http import HttpClient
 from core.logging import bind_request_id, configure_logging, get_logger
+from db.admin_repository import AdminRepository
 from db.config_repository import ConfigRepository
 from db.session import Database
 from models.schemas import Platform, ServiceInfo
@@ -70,7 +76,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     await config.snapshot()
 
-    app.state.app_state = build_state(settings, http, cache, db, config=config)
+    # The administrator is created once, on the first boot that finds the table
+    # empty. A panel without a credential is a working service that refuses to
+    # log in, so a failure here is logged and never stops the boot.
+    admin = AdminAuthService(settings, AdminRepository(db))
+    try:
+        await admin.seed()
+    except Exception as exc:
+        LOGGER.warning("admin_seed_failed", error=sanitize_failure(exc))
+
+    app.state.app_state = build_state(settings, http, cache, db, config=config, admin=admin)
     LOGGER.info(
         "app_started",
         environment=settings.environment,
@@ -156,6 +171,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(system.router, prefix=settings.api_prefix)
     app.include_router(scrape.router, prefix=settings.api_prefix)
     app.include_router(metrics.router, prefix=settings.api_prefix)
+
+    # The panel sits outside api_prefix and outside the published OpenAPI
+    # document: it is an operator surface, not part of the API contract.
+    app.add_exception_handler(AdminApiError, admin_error_handler)
+    app.include_router(admin_router)
+    app.include_router(admin_protected)
+    install_admin_ui(app)
 
     # Model Context Protocol (MCP) SSE endpoint for AI assistants
     try:

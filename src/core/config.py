@@ -123,6 +123,18 @@ class Settings(BaseSettings):
     mcp_enabled: bool = False
     app_encryption_key: str | None = None
 
+    # ---- admin panel ----
+    # The credential below is a seed for the first boot only: once the row
+    # exists the database is the source of truth and the panel changes it.
+    admin_username: str = "admin"
+    admin_password: str | None = None
+    admin_password_hash: str | None = None
+    admin_session_idle_seconds: int = 28800
+    admin_session_absolute_seconds: int = 86400
+    admin_login_max_failures: int = 5
+    admin_login_window_seconds: int = 900
+    admin_lockout_seconds: int = 900
+
     def cookies_file_for(self, platform: str) -> Path | None:
         """Return the configured Netscape cookie file for a platform, if it exists."""
         explicit: Path | None = getattr(self, f"cookies_{platform}_file", None)

@@ -283,6 +283,36 @@ FIELDS: tuple[FieldSpec, ...] = (
           "Chave que cifra os segredos guardados. Só o ambiente a fornece; trocá-la "
           "inutiliza o que já está cifrado.",
           sensitive=True),
+    _spec("admin_username", Section.SECURITY, "Usuário do painel", FieldKind.STRING,
+          FieldClass.ENV_ONLY,
+          "Nome do operador criado no primeiro boot. O ambiente define o nome; a "
+          "senha muda pela tela."),
+    _spec("admin_password", Section.SECURITY, "Senha inicial", FieldKind.SECRET,
+          FieldClass.ENV_ONLY,
+          "Senha em claro usada uma única vez, no primeiro boot, para criar o "
+          "operador. Depois disso a senha vive no banco e muda pela tela.",
+          sensitive=True),
+    _spec("admin_password_hash", Section.SECURITY, "Hash da senha inicial",
+          FieldKind.SECRET, FieldClass.ENV_ONLY,
+          "Alternativa ao texto em claro: um hash Argon2id, que vence a senha "
+          "quando os dois estão definidos.",
+          sensitive=True),
+    _spec("admin_session_idle_seconds", Section.SECURITY, "Sessão ociosa (s)",
+          FieldKind.INTEGER, FieldClass.COLD,
+          "Tempo sem uso que encerra a sessão do painel. Exige reinício."),
+    _spec("admin_session_absolute_seconds", Section.SECURITY, "Sessão máxima (s)",
+          FieldKind.INTEGER, FieldClass.COLD,
+          "Teto absoluto da sessão, mesmo com uso contínuo. Exige reinício."),
+    _spec("admin_login_max_failures", Section.SECURITY, "Falhas até o bloqueio",
+          FieldKind.INTEGER, FieldClass.COLD,
+          "Tentativas de login erradas, por IP e usuário, antes do bloqueio. "
+          "Exige reinício."),
+    _spec("admin_login_window_seconds", Section.SECURITY, "Janela das falhas (s)",
+          FieldKind.INTEGER, FieldClass.COLD,
+          "Intervalo em que as falhas são contadas. Exige reinício."),
+    _spec("admin_lockout_seconds", Section.SECURITY, "Duração do bloqueio (s)",
+          FieldKind.INTEGER, FieldClass.COLD,
+          "Tempo de bloqueio depois de atingir o limite de falhas. Exige reinício."),
 )
 
 #: Registry keyed by the environment name of each field.
