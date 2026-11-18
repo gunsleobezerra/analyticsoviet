@@ -9,6 +9,7 @@ from fastapi import Depends, Request
 
 from core.cache import Cache
 from core.config import Settings
+from core.config_store import ConfigStore
 from core.http import HttpClient
 from db.session import Database
 from platforms.base import AdapterContext
@@ -25,9 +26,16 @@ class AppState:
     registry: AdapterRegistry
     db: Database
     started_at: float
+    config: ConfigStore | None = None
 
 
-def build_state(settings: Settings, http: HttpClient, cache: Cache, db: Database) -> AppState:
+def build_state(
+    settings: Settings,
+    http: HttpClient,
+    cache: Cache,
+    db: Database,
+    config: ConfigStore | None = None,
+) -> AppState:
     import time
 
     from core.logging import get_logger
@@ -45,6 +53,7 @@ def build_state(settings: Settings, http: HttpClient, cache: Cache, db: Database
         registry=AdapterRegistry.default(context),
         db=db,
         started_at=time.monotonic(),
+        config=config,
     )
 
 

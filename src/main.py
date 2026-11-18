@@ -20,9 +20,12 @@ from api.routes import metrics, scrape, system
 from core.banner import inspect_cookies, print_startup_banner
 from core.cache import create_cache
 from core.config import Settings, get_settings
+from core.config_crypto import SecretCipher
+from core.config_store import PersistentConfigStore
 from core.errors import ScrapeError
 from core.http import HttpClient
 from core.logging import bind_request_id, configure_logging, get_logger
+from db.config_repository import ConfigRepository
 from db.session import Database
 from models.schemas import Platform, ServiceInfo
 
@@ -53,9 +56,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     cache = create_cache(settings)
     db = Database(settings)
-    await db.start()
+    try:
+        await db.start()
+    except Exception as exc:
+        # A database that is down must not keep the service from starting: the
+        # configuration falls back to the environment and the reason is logged.
+        LOGGER.warning("db_start_failed", error=str(exc))
 
-    app.state.app_state = build_state(settings, http, cache, db)
+    config = PersistentConfigStore(
+        settings,
+        ConfigRepository(db),
+        SecretCipher.optional(settings.app_encryption_key),
+    )
+    await config.snapshot()
+
+    app.state.app_state = build_state(settings, http, cache, db, config=config)
     LOGGER.info(
         "app_started",
         environment=settings.environment,
